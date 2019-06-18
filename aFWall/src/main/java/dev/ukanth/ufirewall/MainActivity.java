@@ -45,6 +45,7 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
@@ -146,23 +147,11 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
     private BroadcastReceiver toastReceiver;
 
     private Shell.Interactive rootShell = null;
-    private TextWatcher filterTextWatcher = new TextWatcher() {
 
-        public void afterTextChanged(Editable s) {
-            showApplications(s.toString());
-        }
+    IntentFilter filter;
+    IntentFilter toastfilter;
 
-
-        public void beforeTextChanged(CharSequence s, int start, int count,
-                                      int after) {
-        }
-
-        public void onTextChanged(CharSequence s, int start, int before,
-                                  int count) {
-            showApplications(s.toString());
-        }
-
-    };
+    private TextWatcher filterTextWatcher;
 
     public boolean isDirty() {
         return dirty;
@@ -225,6 +214,7 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
             new SecurityUtil(MainActivity.this).passCheck();
             registerNetworkObserver();
         }
+        initTextWatcher();
         //registerQuickApply();
         registerUIbroadcast();
         registerToastbroadcast();
@@ -306,21 +296,37 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         }
     }
 
+    private void initTextWatcher() {
+        filterTextWatcher = new TextWatcher() {
+            public void afterTextChanged(Editable s) {
+                showApplications(s.toString());
+            }
+            public void beforeTextChanged(CharSequence s, int start, int count,
+                                          int after) {
+            }
+
+            public void onTextChanged(CharSequence s, int start, int before,
+                                      int count) {
+                showApplications(s.toString());
+            }
+
+        };
+
+    }
+
     private void registerToastbroadcast() {
-        IntentFilter filter = new IntentFilter("TOAST");
+        toastfilter = new IntentFilter("TOAST");
         toastReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 Api.toast(getApplicationContext(), intent.getExtras().get("MSG") != null ? intent.getExtras().get("MSG").toString() : "", Toast.LENGTH_SHORT);
             }
         };
-        registerReceiver(toastReceiver, filter);
     }
 
     private void registerUIbroadcast() {
-        IntentFilter filter = new IntentFilter("UPDATEUI");
-
-        uiProgressReceiver = new BroadcastReceiver() {
+        filter = new IntentFilter("dev.ukanth.ufirewall.rootshell.UPDATEUI");
+        this.uiProgressReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 String rules = G.enableIPv6() ? " (v4 & v6) " : " (v4) ";
@@ -329,7 +335,6 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
                 }
             }
         };
-        registerReceiver(uiProgressReceiver, filter);
     }
 
     /**
@@ -526,6 +531,9 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         } else {
             fab.setVisibility(View.GONE);
         }*/
+        registerReceiver(toastReceiver, toastfilter);
+        LocalBroadcastManager.getInstance(getApplicationContext()).registerReceiver(this.uiProgressReceiver, filter);
+
         G.activityResumed();
     }
 
@@ -797,6 +805,11 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         View v = this.listview.getChildAt(0);
         top = (v == null) ? 0 : v.getTop();
         G.activityPaused();
+
+        if (toastReceiver != null) {
+            unregisterReceiver(toastReceiver);
+        }
+        LocalBroadcastManager.getInstance(getApplicationContext()).unregisterReceiver(this.uiProgressReceiver);
     }
 
     /**
@@ -2116,12 +2129,6 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         if (dialogLegend != null) {
             dialogLegend.dismiss();
             dialogLegend = null;
-        }
-        if (uiProgressReceiver != null) {
-            unregisterReceiver(uiProgressReceiver);
-        }
-        if (toastReceiver != null) {
-            unregisterReceiver(toastReceiver);
         }
 
     }
