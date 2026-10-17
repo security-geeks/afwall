@@ -3,7 +3,8 @@
     android:layout_width="fill_parent"
     android:layout_height="fill_parent"
     android:background="?attr/itemBackground"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:fitsSystemWindows="true">
 
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/app_toolbar"
@@ -21,7 +22,9 @@
             android:id="@+id/app_icon"
             android:layout_width="38.0dip"
             android:layout_height="38.0dip"
-            android:layout_gravity="center_vertical" />
+            android:layout_gravity="center_vertical"
+            android:scaleType="fitCenter"
+            android:background="?android:attr/selectableItemBackground" />
 
         <LinearLayout
             android:layout_width="0.0dip"

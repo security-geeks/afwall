@@ -16,9 +16,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 
 import com.raizlabs.android.dbflow.sql.language.SQLite;
-import com.stericson.rootshell.execution.Command;
-import com.stericson.rootshell.execution.Shell;
-import com.stericson.roottools.RootTools;
+import com.topjohnwu.superuser.Shell;
 
 import java.io.File;
 import java.util.Arrays;
@@ -30,6 +28,7 @@ import dev.ukanth.ufirewall.log.Log;
 import dev.ukanth.ufirewall.log.LogPreference;
 import dev.ukanth.ufirewall.log.LogPreference_Table;
 import dev.ukanth.ufirewall.util.G;
+import dev.ukanth.ufirewall.util.ThemeHelper;
 
 public class AppDetailActivity extends AppCompatActivity {
     public static final String TAG = "AFWall";
@@ -62,14 +61,16 @@ public class AppDetailActivity extends AppCompatActivity {
                     G.updateLogNotification(appid, isChecked);
                 }
             });
-        } catch (Exception e) {
+        } catch (Exception ignored) {
         }
 
         Toolbar toolbar = findViewById(R.id.app_toolbar);
         setSupportActionBar(toolbar);
 
-        getSupportActionBar().setHomeButtonEnabled(true);
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setHomeButtonEnabled(true);
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
 
         final Context ctx = getApplicationContext();
 
@@ -86,7 +87,7 @@ public class AppDetailActivity extends AppCompatActivity {
         HashMap<Integer,String> listMaps = Api.getPackagesForUser(Api.getListOfUids());
         String packageNameList = "";
         PackageInfo packageInfo =  Api.getPackageDetails(ctx, listMaps, appid);
-        if(packageInfo != null) {
+        if(packageInfo != null && packageInfo.applicationInfo != null) {
             packageNameList = packageInfo.applicationInfo.name;
         }
 
@@ -98,18 +99,17 @@ public class AppDetailActivity extends AppCompatActivity {
         ApplicationInfo applicationInfo;
 
         try {
+            assert packageName != null;
             if (!packageName.startsWith("dev.afwall.special.")) {
                 applicationInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
-                if (applicationInfo != null) {
-                    try {
-                        image.setBackground(applicationInfo.loadIcon(packageManager));
-                    } catch (Exception e){
-                        image.setImageDrawable(applicationInfo.loadIcon(packageManager));
-                    }
-                    String name = packageManager.getApplicationLabel(applicationInfo).toString();
-                    textView.setText(name);
-                    setTotalBytesManual(down, up, applicationInfo.uid);
+                try {
+                    image.setImageDrawable(applicationInfo.loadIcon(packageManager));
+                } catch (Exception e){
+                    image.setImageDrawable(applicationInfo.loadIcon(packageManager));
                 }
+                String name = packageManager.getApplicationLabel(applicationInfo).toString();
+                textView.setText(name);
+                setTotalBytesManual(down, up, applicationInfo.uid);
             } else {
                 image.setImageDrawable(getApplicationContext().getDrawable(R.drawable.ic_unknown));
                 if(appid >= 0) {
@@ -137,18 +137,7 @@ public class AppDetailActivity extends AppCompatActivity {
     }
 
     private void initTheme() {
-        switch(G.getSelectedTheme()) {
-            case "D":
-                setTheme(R.style.AppDarkTheme);
-                break;
-            case "L":
-                setTheme(R.style.AppLightTheme);
-                //set other colors
-                break;
-            case "B":
-                setTheme(R.style.AppBlackTheme);
-                break;
-        }
+        ThemeHelper.applyTheme(this);
     }
 
     private void setTotalBytesManual(TextView down, TextView up, int localUid) {
@@ -177,25 +166,19 @@ public class AppDetailActivity extends AppCompatActivity {
                 String textSent = "0";
                 try {
                     if (uidActualFileReceived.exists() && uidActualFileSent.exists()) {
-                        Command command = new Command(0, "cat " + uidActualFileReceived.getAbsolutePath())
-                        {
-                            @Override
-                            public void commandOutput(int id, String line) {
-                                down.setText(" : " + humanReadableByteCount(Long.parseLong(line), false));
-                                super.commandOutput(id, line);
+                        // read as root; the result is delivered on the main thread
+                        Shell.cmd("cat " + uidActualFileReceived.getAbsolutePath(),
+                                "cat " + uidActualFileSent.getAbsolutePath()).submit(result -> {
+                            java.util.List<String> out = result.getOut();
+                            try {
+                                if (out.size() >= 2) {
+                                    down.setText(" : " + humanReadableByteCount(Long.parseLong(out.get(0).trim()), false));
+                                    up.setText(" : " + humanReadableByteCount(Long.parseLong(out.get(1).trim()), false));
+                                }
+                            } catch (NumberFormatException e) {
+                                Log.e(TAG, "Unexpected traffic counter: " + out);
                             }
-                        };
-                        Command command1 = new Command(1, "cat " + uidActualFileSent.getAbsolutePath())
-                        {
-                            @Override
-                            public void commandOutput(int id, String line) {
-                                up.setText(" : " + humanReadableByteCount(Long.parseLong(line), false));
-                                super.commandOutput(id, line);
-                            }
-                        };
-                        Shell shell = RootTools.getShell(true);
-                        shell.add(command);
-                        shell.add(command1);
+                        });
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Exception while reading tx bytes: " + e.getLocalizedMessage());

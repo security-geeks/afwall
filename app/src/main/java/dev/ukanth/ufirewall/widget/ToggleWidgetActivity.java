@@ -1,29 +1,23 @@
 package dev.ukanth.ufirewall.widget;
 
-import static dev.ukanth.ufirewall.util.SecurityUtil.LOCK_VERIFICATION;
-import static dev.ukanth.ufirewall.util.SecurityUtil.REQ_ENTER_PATTERN;
-import static haibison.android.lockpattern.LockPatternActivity.RESULT_FAILED;
-import static haibison.android.lockpattern.LockPatternActivity.RESULT_FORGOT_PATTERN;
-
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
 import android.view.ViewGroup;
 import android.widget.RelativeLayout;
-import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import com.afollestad.materialdialogs.MaterialDialog;
+
 import dev.ukanth.ufirewall.Api;
 import dev.ukanth.ufirewall.R;
+import dev.ukanth.ufirewall.log.Log;
 import dev.ukanth.ufirewall.profiles.ProfileData;
 import dev.ukanth.ufirewall.profiles.ProfileHelper;
-import dev.ukanth.ufirewall.service.RootCommand;
+import dev.ukanth.ufirewall.util.FirewallActions;
 import dev.ukanth.ufirewall.util.G;
 import dev.ukanth.ufirewall.util.SecurityUtil;
 import dev.ukanth.ufirewall.widget.RadialMenuWidget.RadialMenuEntry;
@@ -33,12 +27,20 @@ public class ToggleWidgetActivity extends Activity {
     private RadialMenuWidget pieMenu;
     private RelativeLayout relativeLayout;
 
+    private static final int ACTION_ENABLE = 1;
+    private static final int ACTION_DISABLE = 2;
+    private static final int ACTION_PROFILE = 4;
+
     private int actionType = 0;
+    // identifier of the profile to switch to (ACTION_PROFILE)
+    private String pendingProfileId;
+    private SecurityUtil security;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.toggle_widget_view);
+        security = new SecurityUtil(this);
 
         relativeLayout = this.findViewById(R.id.widgetCircle);
         pieMenu = new RadialMenuWidget(getBaseContext());
@@ -111,48 +113,29 @@ public class ToggleWidgetActivity extends Activity {
         }
 
         public void menuActiviated() {
-            actionType = 1;
-            startAction(1);
+            startAction(ACTION_ENABLE);
         }
     }
 
     public class Status implements RadialMenuEntry {
         public String getName() {
-            if (G.enableMultiProfile()) {
-                switch (G.storedProfile()) {
-                    case Api.DEFAULT_PREFS_NAME:
-                        return G.gPrefs.getString("default", getApplicationContext().getString(R.string.defaultProfile));
-                    case "AFWallProfile1":
-                        return G.gPrefs.getString("profile1", getApplicationContext().getString(R.string.profile1));
-                    case "AFWallProfile2":
-                        return G.gPrefs.getString("profile2", getApplicationContext().getString(R.string.profile2));
-                    case "AFWallProfile3":
-                        return G.gPrefs.getString("profile3", getApplicationContext().getString(R.string.profile3));
-                    default:
-                        return G.storedProfile();
-                }
-            } else {
-                return "";
-            }
+            return activeProfileName();
         }
 
         public String getLabel() {
-            if (G.enableMultiProfile()) {
-                switch (G.storedProfile()) {
-                    case Api.DEFAULT_PREFS_NAME:
-                        return G.gPrefs.getString("default", getApplicationContext().getString(R.string.defaultProfile));
-                    case "AFWallProfile1":
-                        return G.gPrefs.getString("profile1", getApplicationContext().getString(R.string.profile1));
-                    case "AFWallProfile2":
-                        return G.gPrefs.getString("profile2", getApplicationContext().getString(R.string.profile2));
-                    case "AFWallProfile3":
-                        return G.gPrefs.getString("profile3", getApplicationContext().getString(R.string.profile3));
-                    default:
-                        return G.storedProfile();
-                }
-            } else {
+            return activeProfileName();
+        }
+
+        private String activeProfileName() {
+            if (!G.enableMultiProfile()) {
                 return "";
             }
+            String identifier = G.storedProfile();
+            if (Api.DEFAULT_PREFS_NAME.equals(identifier)) {
+                return G.gPrefs.getString("default", getApplicationContext().getString(R.string.defaultProfile));
+            }
+            ProfileData data = ProfileHelper.getProfileByIdentifier(identifier);
+            return data != null ? data.getName() : identifier;
         }
 
         public int getIcon() {
@@ -186,8 +169,7 @@ public class ToggleWidgetActivity extends Activity {
         }
 
         public void menuActiviated() {
-            actionType = 2;
-            startAction(2);
+            startAction(ACTION_DISABLE);
         }
     }
 
@@ -212,21 +194,9 @@ public class ToggleWidgetActivity extends Activity {
         }
 
         public Profiles() {
-            if (!G.isProfileMigrated()) {
-                children.add(new DefaultProfile());
-                children.add(new Profile1());
-                children.add(new Profile2());
-                children.add(new Profile3());
-                for (String profileName : G.getAdditionalProfiles()) {
-                    RadialMenuEntry entry = new GenericProfile(profileName);
-                    children.add(entry);
-                }
-            } else {
-                children.add(new DefaultProfile());
-                for (ProfileData data : ProfileHelper.getProfiles()) {
-                    RadialMenuEntry entry = new GenericProfile(data.getName());
-                    children.add(entry);
-                }
+            children.add(new DefaultProfile());
+            for (ProfileData data : ProfileHelper.getProfiles()) {
+                children.add(new GenericProfile(data.getName()));
             }
         }
 
@@ -258,42 +228,12 @@ public class ToggleWidgetActivity extends Activity {
         }
 
         public void menuActiviated() {
-            final Handler toaster = new Handler() {
-                public void handleMessage(Message msg) {
-                    if (msg.arg1 != 0)
-                        Toast.makeText(getApplicationContext(), msg.arg1, Toast.LENGTH_SHORT).show();
-                }
-            };
-            final Context context = getApplicationContext();
-            new Thread() {
-                @Override
-                public void run() {
-                    if (G.isProfileMigrated()) {
-                        ProfileData data = ProfileHelper.getProfileByName(profileName);
-                        G.setProfile(true, data.getIdentifier());
-                    } else {
-                        G.setProfile(true, profileName);
-                    }
-                    Api.applySavedIptablesRules(context, true, new RootCommand()
-                            .setSuccessToast(R.string.rules_applied)
-                            .setFailureToast(R.string.error_apply)
-                            .setCallback(new RootCommand.Callback() {
-                                @Override
-                                public void cbFunc(RootCommand state) {
-                                    Message msg = new Message();
-                                    if (state.exitCode == 0) {
-                                        msg.arg1 = R.string.rules_applied;
-                                    } else {
-                                        // error details are already in logcat
-                                        msg.arg1 = R.string.error_apply;
-                                    }
-                                    toaster.sendMessage(msg);
-                                }
-                            }));
-                    //Api.showNotification(Api.isEnabled(getApplicationContext()), getApplicationContext());
-                    Api.updateNotification(Api.isEnabled(getApplicationContext()), getApplicationContext());
-                }
-            }.start();
+            ProfileData data = ProfileHelper.getProfileByName(profileName);
+            if (data != null) {
+                // same checks (app lock) as the other actions
+                pendingProfileId = data.getIdentifier();
+                startAction(ACTION_PROFILE);
+            }
         }
     }
 
@@ -315,254 +255,74 @@ public class ToggleWidgetActivity extends Activity {
         }
 
         public void menuActiviated() {
-            startAction(3);
-        }
-    }
-
-    public class Profile1 implements RadialMenuEntry {
-        public String getName() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile1", getString(R.string.profile1));
-            } else {
-                return "AFWallProfile1";
-            }
-        }
-
-        public String getLabel() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile1", getString(R.string.profile1));
-            } else {
-                return "AFWallProfile1";
-            }
-        }
-
-        public int getIcon() {
-            return 0;
-        }
-
-        public List<RadialMenuEntry> getChildren() {
-            return null;
-        }
-
-        public void menuActiviated() {
-            startAction(4);
-        }
-    }
-
-    public class Profile2 implements RadialMenuEntry {
-        public String getName() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile2", getString(R.string.profile2));
-            } else {
-                return "AFWallProfile2";
-            }
-        }
-
-        public String getLabel() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile2", getString(R.string.profile2));
-            } else {
-                return "AFWallProfile2";
-            }
-        }
-
-        public int getIcon() {
-            return 0;
-        }
-
-        public List<RadialMenuEntry> getChildren() {
-            return null;
-        }
-
-        public void menuActiviated() {
-            startAction(5);
-        }
-    }
-
-    public class Profile3 implements RadialMenuEntry {
-        public String getName() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile3", getString(R.string.profile3));
-            } else {
-                return "AFWallProfile3";
-            }
-        }
-
-        public String getLabel() {
-            if (!G.isProfileMigrated()) {
-                return G.gPrefs.getString("profile3", getString(R.string.profile3));
-            } else {
-                return "AFWallProfile3";
-            }
-        }
-
-        public int getIcon() {
-            return 0;
-        }
-
-        public List<RadialMenuEntry> getChildren() {
-            return null;
-        }
-
-        public void menuActiviated() {
-            startAction(6);
+            pendingProfileId = Api.DEFAULT_PREFS_NAME;
+            startAction(ACTION_PROFILE);
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        switch (requestCode) {
-            case LOCK_VERIFICATION: {
-                switch (resultCode) {
-                    case RESULT_OK:
-                        invokeAction();
-                        break;
-                    default:
-                        ToggleWidgetActivity.this.finish();
-                        android.os.Process.killProcess(android.os.Process.myPid());
-                        break;
-                }
-            }
-            break;
-            case REQ_ENTER_PATTERN: {
-                switch (resultCode) {
-                    case RESULT_OK:
-                        invokeAction();
-                        break;
-                    case RESULT_CANCELED:
-                    case RESULT_FAILED:
-                    case RESULT_FORGOT_PATTERN:
-                    default:
-                        ToggleWidgetActivity.this.finish();
-                        break;
-                }
-            }
-            break;
-        }
+        // device lock / pattern results of the app lock check
+        security.handleActivityResult(requestCode, resultCode);
     }
 
 
     private void startAction(final int i) {
         actionType = i;
-        SecurityUtil util = new SecurityUtil(ToggleWidgetActivity.this);
-        boolean isProtected = util.isPasswordProtected();
-        if (!isProtected) {
-            invokeAction();
-        } else {
-            util.passCheck();
+        if (i == ACTION_DISABLE && G.enableConfirm()) {
+            confirmDisableFromWidget();
+            return;
         }
+        continueActionAfterConfirmation();
+    }
+
+    private void confirmDisableFromWidget() {
+        new MaterialDialog.Builder(this)
+                .title(R.string.confirmMsg)
+                .cancelable(false)
+                .positiveText(R.string.Yes)
+                .negativeText(R.string.No)
+                .onPositive((dialog, which) -> {
+                    Log.i(Api.TAG, "Widget firewall disable confirmed");
+                    dialog.dismiss();
+                    continueActionAfterConfirmation();
+                })
+                .onNegative((dialog, which) -> {
+                    Log.i(Api.TAG, "Widget firewall disable canceled");
+                    dialog.dismiss();
+                    finish();
+                })
+                .show();
+    }
+
+    private void continueActionAfterConfirmation() {
+        security.passCheck(allowed -> {
+            if (allowed) {
+                invokeAction();
+            } else {
+                finish();
+            }
+        });
     }
 
     private void invokeAction() {
-        final Handler toaster = new Handler(getMainLooper()) {
-            @Override
-            public void handleMessage(Message msg) {
-                if (msg.arg1 != 0) {
-                    runOnUiThread(() -> Toast.makeText(getApplicationContext(),msg.arg1,Toast.LENGTH_SHORT).show());
-                }
-            }
-        };
         final Context context = getApplicationContext();
-        new Thread() {
-            @Override
-            public void run() {
-                Looper.prepare();
-                if (actionType < 7) {
-                    switch (actionType) {
-                        case 1:
-                            Api.applySavedIptablesRules(context, true, new RootCommand()
-                                    .setSuccessToast(R.string.rules_applied)
-                                    .setFailureToast(R.string.error_apply)
-                                    .setReopenShell(true)
-                                    .setCallback(new RootCommand.Callback() {
-                                        @Override
-                                        public void cbFunc(RootCommand state) {
-                                            final Message msg = new Message();
-                                            if (state.exitCode == 0) {
-                                                msg.arg1 = R.string.rules_applied;
-                                                Api.setEnabled(context, true, false);
-                                            } else {
-                                                // error details are already in logcat
-                                                msg.arg1 = R.string.error_apply;
-                                            }
-                                            toaster.sendMessage(msg);
-                                        }
-                                    }));
-                            break;
-                        case 2:
-                            //validation, check for password
-                            Api.purgeIptables(context, true, new RootCommand()
-                                    .setSuccessToast(R.string.toast_disabled)
-                                    .setFailureToast(R.string.toast_error_disabling)
-                                    .setReopenShell(true)
-                                    .setCallback(new RootCommand.Callback() {
-                                        public void cbFunc(RootCommand state) {
-                                            final Message msg = new Message();
-                                            if (state.exitCode == 0) {
-                                                msg.arg1 = R.string.toast_disabled;
-                                                Api.setEnabled(context, false, false);
-                                            } else {
-                                                // error details are already in logcat
-                                                msg.arg1 = R.string.toast_error_disabling;
-                                            }
-                                            toaster.sendMessage(msg);
-                                        }
-                                    }));
-                            break;
-                        case 3:
-                            G.setProfile(G.enableMultiProfile(), "AFWallPrefs");
-                            break;
-                        case 4:
-                            G.setProfile(true, "AFWallProfile1");
-                            break;
-                        case 5:
-                            G.setProfile(true, "AFWallProfile2");
-                            break;
-                        case 6:
-                            G.setProfile(true, "AFWallProfile3");
-                            break;
-                    }
-                    if (actionType > 2) {
-                        final Message msg = new Message();
-                        Api.applySavedIptablesRules(context, true, new RootCommand()
-                                .setSuccessToast(R.string.rules_applied)
-                                .setFailureToast(R.string.error_apply)
-                                .setCallback(new RootCommand.Callback() {
-                                    @Override
-                                    public void cbFunc(RootCommand state) {
-                                        if (state.exitCode == 0) {
-                                            msg.arg1 = R.string.rules_applied;
-                                        } else {
-                                            // error details are already in logcat
-                                            msg.arg1 = R.string.error_apply;
-                                        }
-                                        toaster.sendMessage(msg);
-                                    }
-                                }));
-                        G.reloadPrefs();
-                    }
+        FirewallActions.Done updateNotification = ok -> Api.updateNotification(Api.isEnabled(context), context);
+        switch (actionType) {
+            case ACTION_ENABLE:
+                FirewallActions.setEnabled(context, true, true, updateNotification);
+                break;
+            case ACTION_DISABLE:
+                FirewallActions.setEnabled(context, false, true, updateNotification);
+                break;
+            case ACTION_PROFILE:
+                if (pendingProfileId != null) {
+                    // applies the rules only while the firewall is enabled
+                    FirewallActions.switchProfile(context, pendingProfileId, true, updateNotification);
                 }
-                //Api.showNotification(Api.isEnabled(getApplicationContext()), getApplicationContext());
-                Api.updateNotification(Api.isEnabled(getApplicationContext()), getApplicationContext());
-            }
-        }.start();
+                break;
+        }
     }
 
-    /*private boolean applyProfileRules(final Context context, final Message msg, final Handler toaster) {
-        boolean ret = Api.applySavedIptablesRules(context, false, new RootCommand()
-                .setFailureToast(R.string.error_apply)
-                .setCallback(new RootCommand.Callback() {
-                    @Override
-                    public void cbFunc(RootCommand state) {
-                        if (state.exitCode == 0) {
-                            msg.arg1 = R.string.rules_applied;
-                        } else {
-                            // error details are already in logcat
-                            msg.arg1 = R.string.error_apply;
-                        }
-                    }
-                }));
-        return ret;
-    }*/
 }

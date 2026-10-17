@@ -1,4 +1,5 @@
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <!-- <PreferenceCategory android:title="@string/log_prefs_title" >
          <CheckBoxPreference
@@ -19,16 +20,23 @@
             android:key="logDmesg"
             android:title="@string/log_dmesg"></ListPreference>-->
 
-        <ListPreference
-            android:defaultValue="LOG"
-            android:summary="%s"
-            android:key="logTarget"
-            android:title="@string/log_target"></ListPreference>
-
-
         <CheckBoxPreference
             android:key="enableLogService"
             android:title="@string/enable_firewall_log_service" />
+
+        <CheckBoxPreference
+            android:defaultValue="true"
+            android:dependency="enableLogService"
+            android:key="notifyBlocked"
+            android:summary="@string/notify_blocked_summary"
+            android:title="@string/notify_blocked_title" />
+
+        <ListPreference
+            android:defaultValue="LOG"
+            android:summary="%s"
+            android:dependency="enableLogService"
+            android:key="logTarget"
+            android:title="@string/log_target"></ListPreference>
 
         <CheckBoxPreference
             android:defaultValue="false"
@@ -38,27 +46,18 @@
             android:summary="@string/showhost_desc"
             android:title="@string/show_host" />
 
-
-       <!-- <ListPreference
-            android:defaultValue="bottom"
+        <!-- counts kept for the log dashboard; the log itself only keeps a few hours (LogHistory) -->
+        <ListPreference
+            android:defaultValue="30"
+            android:dependency="enableLogService"
+            android:entries="@array/log_history_days"
+            android:entryValues="@array/log_history_days_values"
+            android:key="logHistoryDays"
             android:summary="%s"
-            android:dependency="enableLogService"
-            android:entries="@array/toast_pos"
-            android:entryValues="@array/toast_pos_val"
-            android:key="toast_pos"
-            android:title="@string/position"></ListPreference> -->
+            android:title="@string/log_history_title" />
 
-        <EditTextPreference
-            android:dependency="enableLogService"
-            android:dialogMessage="Default - 10s"
-            android:dialogTitle="Ping timeout (seconds)"
-            android:inputType="number"
-            android:key="logPingTime"
-            android:title="@string/pingDelayTitle" />
 
-        <!--<Preference
-            android:key="block_filter"
-            android:title="@string/filters_apps_title"></Preference> -->
+
 
     </PreferenceCategory>
 

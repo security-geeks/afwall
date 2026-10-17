@@ -28,7 +28,9 @@ import dev.ukanth.ufirewall.log.Log;
 import dev.ukanth.ufirewall.profiles.ProfileAdapter;
 import dev.ukanth.ufirewall.profiles.ProfileData;
 import dev.ukanth.ufirewall.profiles.ProfileHelper;
+import dev.ukanth.ufirewall.util.AppRuleHelper;
 import dev.ukanth.ufirewall.util.G;
+import dev.ukanth.ufirewall.util.ThemeHelper;
 
 /**
  * Created by ukanth on 31/7/15.
@@ -46,10 +48,12 @@ public class ProfileActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ThemeHelper.applyTheme(this);
         setContentView(R.layout.profile_main);
 
         Toolbar toolbar = findViewById(R.id.profile_toolbar);
         setSupportActionBar(toolbar);
+        setTitle(R.string.manage_profiles);
 
         getSupportActionBar().setHomeButtonEnabled(true);
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
@@ -96,10 +100,8 @@ public class ProfileActivity extends AppCompatActivity {
         //ProfileData profile = profileAdapter.getItem(aInfo.position);
         String name = ((TextView) aInfo.targetView.findViewById(R.id.pro_name)).getText().toString();
         menu.setHeaderTitle(getString(R.string.select) + " " + name);
-        if (G.isProfileMigrated()) {
-            menu.add(0, MENU_CLONE, 0, getString(R.string.clone));
-            menu.add(0, MENU_RENAME, 0, getString(R.string.rename));
-        }
+        menu.add(0, MENU_CLONE, 0, getString(R.string.clone));
+        menu.add(0, MENU_RENAME, 0, getString(R.string.rename));
         menu.add(0, MENU_DELETE, 0, getString(R.string.delete));
     }
 
@@ -111,29 +113,14 @@ public class ProfileActivity extends AppCompatActivity {
         String profileName = profilesList.get(aInfo.position).getName();
         switch (itemId) {
             case MENU_DELETE:
-                if (!G.isProfileMigrated()) {
-                    if (aInfo.position > 3) {
-                        boolean deleted = G.removeAdditionalProfile(profileName);
-                        if (deleted) {
-                            profilesList.remove(aInfo.position);
-                            profileAdapter.notifyDataSetChanged();
-                        } else {
-                            Api.toast(getApplicationContext(), getString(R.string.delete_profile));
-                        }
-                    } else {
-                        //TODO: can't delete default profiles(1,2,3) msg - Use migrate option
-                        Api.toast(getApplicationContext(), getString(R.string.profile_notsupport));
-                    }
-                } else {
-                    if (aInfo.position != 0) {
-                        ProfileData data = ProfileHelper.getProfileByName(profileName);
-                        if (data != null && ProfileHelper.deleteProfileByName(profileName)
-                                && G.clearSharedPreferences(getApplicationContext(), data.getIdentifier())) {
-                            profilesList.remove(aInfo.position);
-                            profileAdapter.notifyDataSetChanged();
-                        }
-                    } else {
-                        //can't delete default profile
+                // the default profile can't be deleted
+                if (aInfo.position != 0) {
+                    ProfileData data = ProfileHelper.getProfileByName(profileName);
+                    if (data != null && ProfileHelper.deleteProfileByName(profileName)
+                            && G.clearSharedPreferences(getApplicationContext(), data.getIdentifier())) {
+                        AppRuleHelper.deleteRulesForProfile(data.getIdentifier());
+                        profilesList.remove(aInfo.position);
+                        profileAdapter.notifyDataSetChanged();
                     }
                 }
                 break;
@@ -159,9 +146,7 @@ public class ProfileActivity extends AppCompatActivity {
                                                 data1.setName(newName);
                                                 data1.setIdentifier(identifier);
                                                 data1.save();
-                                                SharedPreferences fromShared = getSharedPreferences(profileName, Context.MODE_PRIVATE);
-                                                SharedPreferences.Editor toShared = getSharedPreferences(newName,Context.MODE_PRIVATE).edit();
-                                                Api.copySharedPreferences(fromShared,toShared);
+                                                copyRules(data.getIdentifier(), identifier);
                                                 profilesList.add(data1);
                                                 profileAdapter.notifyDataSetChanged();
                                             } else {
@@ -199,21 +184,7 @@ public class ProfileActivity extends AppCompatActivity {
         // We populate the Profiles
         profilesList.add(new ProfileData(G.gPrefs.getString("default", getString(R.string.defaultProfile)), ""));
 
-        if (G.isProfileMigrated()) {
-            List<ProfileData> profiles = ProfileHelper.getProfiles();
-            profilesList.addAll(profiles);
-        } else {
-            profilesList.add(new ProfileData(G.gPrefs.getString("profile1", getString(R.string.profile1)), "AFWallProfile1"));
-            profilesList.add(new ProfileData(G.gPrefs.getString("profile2", getString(R.string.profile2)), "AFWallProfile2"));
-            profilesList.add(new ProfileData(G.gPrefs.getString("profile3", getString(R.string.profile3)), "AFWallProfile3"));
-
-            List<String> pList = G.getAdditionalProfiles();
-            for (String profileName : pList) {
-                if (profileName != null && profileName.length() > 0) {
-                    profilesList.add(new ProfileData(profileName, profileName));
-                }
-            }
-        }
+        profilesList.addAll(ProfileHelper.getProfiles());
     }
 
     private void renameProfile(final ProfileData data, final int position) {
@@ -237,26 +208,37 @@ public class ProfileActivity extends AppCompatActivity {
                 }).show();
     }
 
+    /**
+     * Copy a profile's rules (app lists and settings, and the per-app rules) to another profile,
+     * replacing what it had. Rules are stored under the identifier, not the display name.
+     */
+    private void copyRules(String fromIdentifier, String toIdentifier) {
+        SharedPreferences from = getSharedPreferences(fromIdentifier, Context.MODE_PRIVATE);
+        SharedPreferences.Editor to = getSharedPreferences(toIdentifier, Context.MODE_PRIVATE).edit().clear();
+        Api.copySharedPreferences(from, to);
+        AppRuleHelper.copyRulesToProfile(fromIdentifier, toIdentifier);
+    }
+
     // Handle user click
     private void addNewProfile() {
-
+        // a new profile starts from the active profile's rules unless unchecked (#1443)
+        final String current = G.enableMultiProfile() ? G.storedProfile() : Api.DEFAULT_PREFS_NAME;
         new MaterialDialog.Builder(this)
                 .cancelable(true)
                 .title(R.string.profile_add)
                 .inputType(InputType.TYPE_CLASS_TEXT)
+                .checkBoxPrompt(getString(R.string.profile_copy_current, ProfileHelper.displayName(this, current)), true, null)
                 .input(R.string.profile_add, R.string.profile_hint, (dialog, input) -> {
                     String profileName = input.toString();
                     if (isNotDuplicate(profileName)) {
                         String identifier = profileName.replaceAll("\\s+", "");
                         ProfileData data = new ProfileData(profileName, identifier);
-                        if (G.isProfileMigrated()) {
-                            //store to database
-                            data.save();
-                            profilesList.add(data);
-                            profileAdapter.notifyDataSetChanged();
-                        } else {
-                            Api.toast(getApplicationContext(), getString(R.string.profile_notsupport));
+                        data.save();
+                        if (dialog.isPromptCheckBoxChecked()) {
+                            copyRules(current, identifier);
                         }
+                        profilesList.add(data);
+                        profileAdapter.notifyDataSetChanged();
                     } else {
                         Api.toast(getApplicationContext(), getString(R.string.profile_duplicate));
                     }

@@ -1,76 +1,83 @@
 package dev.ukanth.ufirewall.activity;
 
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.core.content.ContextCompat;
-import androidx.viewpager.widget.ViewPager;
-
+import androidx.core.widget.ImageViewCompat;
+import dev.ukanth.ufirewall.BuildConfig;
 import dev.ukanth.ufirewall.R;
-import dev.ukanth.ufirewall.ui.about.ViewPagerAdapter;
 import dev.ukanth.ufirewall.util.G;
-import dev.ukanth.ufirewall.util.SlidingTabLayout;
+import dev.ukanth.ufirewall.util.ThemeHelper;
 
 public class HelpActivity extends AppCompatActivity {
 
-    private ViewPager viewPager;
-    private ViewPagerAdapter adapter;
-    private SlidingTabLayout tabs;
-	private final int count = 0;
-    private final int noOfTabs =2;
-
-
-	@Override
+    @Override
     public void onCreate(Bundle savedInstanceState) {
-            super.onCreate(savedInstanceState);
-            
-            String[] viewTitles = { getString(R.string.About), getString(R.string.FAQ) };
+        super.onCreate(savedInstanceState);
 
-            initTheme();
+        initTheme();
 
-            setContentView(R.layout.help_about);
+        setContentView(R.layout.help_about);
 
-            Toolbar toolbar = findViewById(R.id.help_toolbar);
-            setSupportActionBar(toolbar);
+        Toolbar toolbar = findViewById(R.id.help_toolbar);
+        setSupportActionBar(toolbar);
 
-
-            // Creating The ViewPagerAdapter and Passing Fragment Manager, Titles fot the Tabs and Number Of Tabs.
-            adapter =  new ViewPagerAdapter(getSupportFragmentManager(), viewTitles, noOfTabs);
-
-            // Initilization
-            viewPager = findViewById(R.id.pager);
-
-            viewPager.setAdapter(adapter);
-
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle(R.string.help);
             getSupportActionBar().setHomeButtonEnabled(true);
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
 
-            // Assiging the Sliding Tab Layout View
-            tabs = findViewById(R.id.tabs);
-            tabs.setDistributeEvenly(true); // To make the Tabs Fixed set this true, This makes the tabs Space Evenly in Available width
+        setupContent();
+    }
 
-            // Setting Custom Color for the Scroll bar indicator of the Tab View
-            tabs.setCustomTabColorizer(position -> ContextCompat.getColor(getApplicationContext(),R.color.white));
+    private void setupContent() {
+        String version = BuildConfig.VERSION_NAME;
+        TextView titleText = findViewById(R.id.afwall_title);
+        String versionText = getString(R.string.app_name) + " (v" + version + ")";
+        if (G.isDonate() || G.isDoKey(this)) {
+            versionText = versionText + " (Donate) " + getString(R.string.donate_thanks) + " :)";
+        }
+        titleText.setText(versionText);
 
-            // Setting the ViewPager For the SlidingTabsLayout
-            tabs.setViewPager(viewPager);
+        // the themes tint images (theme attribute "tint"): show the launcher icon in its colors
+        ImageView logo = findViewById(R.id.help_logo);
+        if (logo != null) {
+            ImageViewCompat.setImageTintList(logo, null);
+        }
+
+        link(R.id.help_link_wiki_row, "https://github.com/ukanth/afwall/wiki");
+        link(R.id.help_link_source_row, "https://github.com/ukanth/afwall");
+        link(R.id.help_link_issues_row, "https://github.com/ukanth/afwall/issues");
+    }
+
+    private void link(int rowId, String url) {
+        View row = findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        row.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(this, url, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
 
+
     private void initTheme() {
-        switch(G.getSelectedTheme()) {
-            case "D":
-                setTheme(R.style.AppDarkTheme);
-                break;
-            case "L":
-                setTheme(R.style.AppLightTheme);
-                break;
-            case "B":
-                setTheme(R.style.AppBlackTheme);
-                break;
-        }
+        ThemeHelper.applyTheme(this);
     }
 
      @Override

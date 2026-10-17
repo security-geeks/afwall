@@ -24,12 +24,12 @@
 package dev.ukanth.ufirewall.activity;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.os.AsyncTask;
-import android.os.Build;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.TypedValue;
@@ -41,20 +41,24 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
+import androidx.cardview.widget.CardView;
+import androidx.core.widget.NestedScrollView;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 import dev.ukanth.ufirewall.Api;
 import dev.ukanth.ufirewall.R;
 import dev.ukanth.ufirewall.log.Log;
+import dev.ukanth.ufirewall.util.BackupStorage;
 import dev.ukanth.ufirewall.util.G;
+import dev.ukanth.ufirewall.util.ThemeHelper;
 
 
 public abstract class DataDumpActivity extends AppCompatActivity {
@@ -69,7 +73,21 @@ public abstract class DataDumpActivity extends AppCompatActivity {
     protected static final int MENU_ZOOM_IN = 22;
     protected static final int MENU_ZOOM_OUT = 23;
     TextView scaleGesture;
-    ScrollView mScrollView;
+    View mScrollView;  // Can be either ScrollView or NestedScrollView
+    
+    // Modern layout components
+    private TextView rulesTitle;
+    private TextView rulesStatus;
+    private TextView rulesContent;
+    private TextView interfacesContent;
+    private TextView systemContent;
+    private TextView preferencesContent;
+    private TextView logcatContent;
+    private CardView interfacesCard;
+    private CardView systemCard;
+    private CardView preferencesCard;
+    private CardView logcatCard;
+    private boolean useModernLayout = true;
 
     protected Menu mainMenu;
     protected static String dataText;
@@ -82,31 +100,188 @@ public abstract class DataDumpActivity extends AppCompatActivity {
     protected abstract void populateData(final Context ctx);
 
     private static final int MY_PERMISSIONS_REQUEST_WRITE_STORAGE = 1;
-    private static final int MY_PERMISSIONS_REQUEST_READ_STORAGE = 2;
-    private static final int MY_PERMISSIONS_REQUEST_WRITE_STORAGE_ASSET = 3;
+
+    private void initModernViews() {
+        rulesTitle = findViewById(R.id.rules_title);
+        rulesStatus = findViewById(R.id.rules_status);
+        rulesContent = findViewById(R.id.rules_content);
+        interfacesContent = findViewById(R.id.interfaces_content);
+        systemContent = findViewById(R.id.system_content);
+        preferencesContent = findViewById(R.id.preferences_content);
+        logcatContent = findViewById(R.id.logcat_content);
+        interfacesCard = findViewById(R.id.interfaces_card);
+        systemCard = findViewById(R.id.system_card);
+        preferencesCard = findViewById(R.id.preferences_card);
+        logcatCard = findViewById(R.id.logcat_card);
+    }
 
     protected void setData(final String data) {
         dataText = data;
         Handler refresh = new Handler(Looper.getMainLooper());
         refresh.post(() -> {
-            scaleGesture = findViewById(R.id.rules);
-            scaleGesture.setText(data);
-            scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, G.ruleTextSize());
+            if (useModernLayout) {
+                parseAndDisplayModernData(data);
+            } else {
+                scaleGesture = findViewById(R.id.rules);
+                scaleGesture.setText(data);
+                scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, G.ruleTextSize());
+            }
         });
     }
 
-    private void initTheme() {
-        switch(G.getSelectedTheme()) {
-            case "D":
-                setTheme(R.style.AppDarkTheme);
+    @SuppressLint("SetTextI18n")
+    private void parseAndDisplayModernData(String data) {
+        // Initialize all sections as empty and hide cards
+        rulesContent.setText("");
+        interfacesContent.setText("");
+        systemContent.setText("");
+        preferencesContent.setText("");
+        logcatContent.setText("");
+        
+        interfacesCard.setVisibility(View.GONE);
+        systemCard.setVisibility(View.GONE);
+        preferencesCard.setVisibility(View.GONE);
+        logcatCard.setVisibility(View.GONE);
+
+        // Parse sections more intelligently by looking for section headers
+        String[] lines = data.split("\n");
+        StringBuilder currentSection = new StringBuilder();
+        String currentSectionType = null;
+        
+        for (String line : lines) {
+            // Check if this is a section header (starts with =, contains title, ends with =)
+            if (line.matches("^=+$")) {
+                // Skip separator lines
+                continue;
+            }
+            
+            // Check if this line is a section title
+            String sectionType = detectSectionType(line.trim());
+            
+            if (sectionType != null) {
+                // Process previous section if it exists
+                if (currentSectionType != null && currentSection.length() > 0) {
+                    processSectionContent(currentSectionType, currentSection.toString());
+                }
+                
+                // Start new section
+                currentSectionType = sectionType;
+                currentSection = new StringBuilder();
+                continue;
+            }
+            
+            // Add line to current section
+            if (currentSectionType != null) {
+                currentSection.append(line).append("\n");
+            }
+        }
+        
+        // Process the last section
+        if (currentSectionType != null && currentSection.length() > 0) {
+            processSectionContent(currentSectionType, currentSection.toString());
+        }
+        
+        // Set font sizes for all content views
+        float textSize = G.ruleTextSize();
+        rulesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize);
+        interfacesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize);
+        systemContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize);
+        preferencesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize);
+        logcatContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize);
+
+        // Keep the hidden TextView updated for backward compatibility (export, copy functions)
+        TextView hiddenRules = findViewById(R.id.rules);
+        hiddenRules.setText(data);
+    }
+    
+    private String detectSectionType(String line) {
+        String trimmed = line.trim();
+        if (trimmed.equals(getString(R.string.ipv4_rules_title))) {
+            return "ipv4_rules";
+        } else if (trimmed.equals(getString(R.string.ipv6_rules_title))) {
+            return "ipv6_rules";
+        } else if (trimmed.contains("Network interfaces")) {
+            return "interfaces";
+        } else if (trimmed.contains("ifconfig")) {
+            return "ifconfig";
+        } else if (trimmed.contains("System info")) {
+            return "system";
+        } else if (trimmed.contains("Preferences")) {
+            return "preferences";
+        } else if (trimmed.contains("Logcat")) {
+            return "logcat";
+        }
+        return null;
+    }
+    
+    private void processSectionContent(String sectionType, String content) {
+        String trimmedContent = content.trim();
+        if (trimmedContent.isEmpty()) return;
+        
+        switch (sectionType) {
+            case "ipv4_rules":
+                rulesTitle.setText(getString(R.string.ipv4_rules_title));
+                rulesStatus.setText(getString(R.string.ready));
+                rulesContent.setText(trimmedContent);
                 break;
-            case "L":
-                setTheme(R.style.AppLightTheme);
+                
+            case "ipv6_rules":
+                rulesTitle.setText(getString(R.string.ipv6_rules_title));
+                rulesStatus.setText(getString(R.string.ready));
+                rulesContent.setText(trimmedContent);
                 break;
-            case "B":
-                setTheme(R.style.AppBlackTheme);
+                
+            case "interfaces":
+            case "ifconfig":
+                interfacesCard.setVisibility(View.VISIBLE);
+                String existingInterfaces = interfacesContent.getText().toString();
+                if (!existingInterfaces.isEmpty()) {
+                    interfacesContent.setText(existingInterfaces + "\n\n" + trimmedContent);
+                } else {
+                    interfacesContent.setText(trimmedContent);
+                }
+                break;
+                
+            case "system":
+                systemCard.setVisibility(View.VISIBLE);
+                systemContent.setText(trimmedContent);
+                break;
+                
+            case "preferences":
+                preferencesCard.setVisibility(View.VISIBLE);
+                String existingPrefs = preferencesContent.getText().toString();
+                if (!existingPrefs.isEmpty()) {
+                    preferencesContent.setText(existingPrefs + "\n\n" + trimmedContent);
+                } else {
+                    preferencesContent.setText(trimmedContent);
+                }
+                break;
+                
+            case "logcat":
+                logcatCard.setVisibility(View.VISIBLE);
+                logcatContent.setText(trimmedContent);
                 break;
         }
+    }
+
+    private void updateModernTextSize(float sizeDelta) {
+        float currentSize = G.ruleTextSize();
+        float newSize = currentSize + sizeDelta;
+        
+        if (newSize < 8.0f) newSize = 8.0f;  // Minimum size
+        if (newSize > 30.0f) newSize = 30.0f; // Maximum size
+        
+        G.ruleTextSize((int) newSize);
+        
+        if (rulesContent != null) rulesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+        if (interfacesContent != null) interfacesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+        if (systemContent != null) systemContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+        if (preferencesContent != null) preferencesContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+        if (logcatContent != null) logcatContent.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+    }
+
+    private void initTheme() {
+        ThemeHelper.applyTheme(this);
     }
 
     @Override
@@ -115,7 +290,12 @@ public abstract class DataDumpActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         initTheme();
-        setContentView(R.layout.rules);
+        if (useModernLayout) {
+            setContentView(R.layout.rules_modern);
+            initModernViews();
+        } else {
+            setContentView(R.layout.rules);
+        }
 
         Toolbar toolbar = findViewById(R.id.rule_toolbar);
         //toolbar.setTitle(getString(R.string.showrules_title));
@@ -131,13 +311,14 @@ public abstract class DataDumpActivity extends AppCompatActivity {
         mScrollView = findViewById(R.id.ruleScrollView);
 
         // Load partially transparent black background
-        getSupportActionBar().setHomeButtonEnabled(true);
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setHomeButtonEnabled(true);
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
 
         setData("");
         populateData(this);
 
-        Api.updateLanguage(getApplicationContext(), G.locale());
     }
 
     @Override
@@ -162,37 +343,51 @@ public abstract class DataDumpActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        float newSize;
         switch (item.getItemId()) {
-            case MENU_COPY:
+            case MENU_COPY -> {
                 copy();
                 return true;
-            case MENU_EXPORT_LOG:
+            }
+            case MENU_EXPORT_LOG -> {
                 exportToSD();
                 return true;
-            case MENU_REFRESH:
+            }
+            case MENU_REFRESH -> {
                 populateData(this);
                 return true;
-            case MENU_ZOOM_IN:
-                Float newSize = scaleGesture.getTextSize() + 2.0f;
-                scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
-                G.ruleTextSize(newSize.intValue());
+            }
+            case MENU_ZOOM_IN -> {
+                if (useModernLayout) {
+                    updateModernTextSize(2.0f);
+                } else {
+                    newSize = scaleGesture.getTextSize() + 2.0f;
+                    scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+                    G.ruleTextSize((int) newSize);
+                }
                 return false;
-            case MENU_ZOOM_OUT:
-                newSize = scaleGesture.getTextSize() - 2.0f;
-                scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
-                G.ruleTextSize(newSize.intValue());
+            }
+            case MENU_ZOOM_OUT -> {
+                if (useModernLayout) {
+                    updateModernTextSize(-2.0f);
+                } else {
+                    newSize = scaleGesture.getTextSize() - 2.0f;
+                    scaleGesture.setTextSize(TypedValue.COMPLEX_UNIT_PX, newSize);
+                    G.ruleTextSize((int) newSize);
+                }
                 return false;
-            default:
+            }
+            default -> {
                 return super.onOptionsItemSelected(item);
+            }
         }
     }
 
-
-    private static class Task extends AsyncTask<Void, Void, Boolean> {
+    private static class Task implements Runnable {
         public String filename = "";
         private final Context ctx;
-
         private final WeakReference<DataDumpActivity> activityReference;
+        private final Handler handler = new Handler(Looper.getMainLooper());
 
         // only retain a weak reference to the activity
         Task(DataDumpActivity context) {
@@ -200,71 +395,54 @@ public abstract class DataDumpActivity extends AppCompatActivity {
             activityReference = new WeakReference<>(context);
         }
 
-
         @Override
-        public Boolean doInBackground(Void... args) {
-            FileOutputStream output = null;
-            boolean res = false;
-
-            try {
-                File file;
-                if(Build.VERSION.SDK_INT  < Build.VERSION_CODES.Q ){
-                    File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/" );
-                    dir.mkdirs();
-                    file = new File(dir, sdDumpFile);
-                } else{
-                    file = new File(ctx.getExternalFilesDir(null) + "/" + sdDumpFile) ;
-                }
-                output = new FileOutputStream(file);
-                output.write(dataText.getBytes());
-                filename = file.getAbsolutePath();
-                res = true;
-            } catch (FileNotFoundException e) {
-                Log.e(TAG,e.getMessage(),e);
-            } catch (IOException e) {
-                Log.e(TAG,e.getMessage(),e);
-            } finally {
-                try {
-                    if (output != null) {
-                        output.flush();
-                        output.close();
-                    }
-                } catch (IOException ex) {
-                    Log.e(TAG,ex.getMessage(),ex);
-                }
-            }
-            return res;
-        }
-
-        @Override
-        public void onPostExecute(Boolean res) {
-            DataDumpActivity activity = activityReference.get();
-            if (activity == null || activity.isFinishing()) return;
-
+        public void run() {
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(new Date());
+            String timestampedFileName = sdDumpFile.replace(".log", "") + "-" + timestamp + ".txt";
+            String saved = BackupStorage.save(ctx, timestampedFileName, BackupStorage.MIME_TEXT, dataText);
+            boolean res = saved != null;
             if (res) {
-                Api.toast(ctx, ctx.getString(R.string.export_rules_success) + filename, Toast.LENGTH_LONG);
+                filename = saved;
+            }
+
+            final boolean result = res;
+            handler.post(() -> {
+                DataDumpActivity activity = activityReference.get();
+                if (activity == null || activity.isFinishing()) return;
+
+                if (result) {
+                    Api.toast(ctx, ctx.getString(R.string.export_rules_success) + filename, Toast.LENGTH_LONG);
+                } else {
+                    Api.toast(ctx, ctx.getString(R.string.export_logs_fail), Toast.LENGTH_LONG);
+                }
+            });
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == MY_PERMISSIONS_REQUEST_WRITE_STORAGE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                exportToSD(); // finish what the user asked for
             } else {
-                Api.toast(ctx, ctx.getString(R.string.export_logs_fail), Toast.LENGTH_LONG);
+                Api.toast(this, getString(R.string.permissiondenied_importexport));
             }
         }
     }
 
     private void exportToSD() {
-
-        if(Build.VERSION.SDK_INT  >= Build.VERSION_CODES.Q ){
-            // Do some stuff
-            new Task(this).execute();
-        } else {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
-                // permissions have not been granted.
-                ActivityCompat.requestPermissions(DataDumpActivity.this,
-                        new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        MY_PERMISSIONS_REQUEST_WRITE_STORAGE);
-            } else{
-                new Task(this).execute();
-            }
+        if (BackupStorage.needsStoragePermission()
+                && ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(DataDumpActivity.this,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    MY_PERMISSIONS_REQUEST_WRITE_STORAGE);
+            return;
         }
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(new Task(this));
+        executor.shutdown();
     }
 
     private void copy() {

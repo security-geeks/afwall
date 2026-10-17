@@ -4,6 +4,8 @@
 
 .DS_Store
 
+make-donate.sh
+
 # Files for the dex VM
 *.dex
 
@@ -17,16 +19,8 @@ out/
 build/
 build.xml
 
-# Gradle wrapper
-gradlew
-gradlew.bat
-gradle-wrapper.jar
-gradle-wrapper.properties
-
 # Gradle
 .gradle/
-gradle/
-gradle*
 
 # Log Files
 *.log

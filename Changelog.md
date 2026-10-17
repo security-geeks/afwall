@@ -1,6 +1,174 @@
 AFWall+ Changelog
 ==================
 
+AFWall+ v5.0.0
+
+    Added: Backups, log and rule exports are saved to Download/AFWall (visible in file managers, kept after uninstall); import uses the system file picker and old backups are copied over automatically
+    Added: System services without an app (UIDs below 10000) are listed once they use the network, so they can be allowed or blocked
+    Added: "Allow this app" / "Block this app" in the log details
+    Added: Security - "Allow Tasker/Locale control" setting to prevent unauthorized access
+    Added: Global rules (Menu > Global rules) - allow or block an address, port or protocol for all apps
+    Added: Direct rules can block as well as allow, can be limited to Wi-Fi, mobile data or VPN, and each rule has an on/off switch
+    Added: Custom scripts - "iptables" lines are IPv4 only, "ip6tables" lines IPv6 only, "$IPTABLES" lines both; $AFWALL_CHAIN for the AFWall+ chain (works for every user); # comments
+    Added: Custom script editor checks lines as you type and says why a line is ignored; Snippets menu with ready-made lines
+    Added: Language can also be set in Android 13+ Settings > Apps > AFWall+ > Language; Croatian, Danish, Norwegian, Persian and Vietnamese
+    Added: Log history (Log > Keep log history) - blocked-connection counts kept for 7, 30 (default) or 90 days, beyond the few hours the log itself keeps; cleared together with the log
+    Added: Log details - turn notifications for the app's blocked connections on or off
+    Improved: Faster, atomic rule apply using iptables-restore, with automatic fallback
+    Improved: Root command engine rewritten - one root library (libsu), fewer root shells, more reliable apply
+    Improved: Direct rules also apply to IPv6
+    Improved: Backup/restore covers all profiles, custom rules and special apps and works across devices; older backups still import
+    Improved: Log - correct app attribution, fewer "Unknown" entries, explains why it is empty or not running, log targets re-checked on every start
+    Improved: Notifications - consistent status notification, new-app notifications with Allow/Block, rate-limited blocked notifications
+    Improved: Work profile / Private Space apps shown with name, icon and badge
+    Improved: Boot leak protection works with file-based encryption and finds the boot script directory itself
+    Improved: Custom script errors are reported instead of aborting the apply (#1493)
+    Improved: Custom scripts are not run through a shell any more - each line is checked and run as one iptables command, so a script (or an imported backup) can't run other commands
+    Improved: Disabling the firewall removes the rules a custom script added outside AFWall+'s chains (INPUT, nat, own chains)
+    Improved: Language list shows each language in its own name, with "System default" as the default
+    Improved: Backups keep block and network direct rules apart, so older versions skip them instead of importing them as allow rules
+    Improved: Preferences show the iptables binary actually in use
+    Improved: iptables binary - falls back to the built-in one when system iptables is missing, and to system iptables when the built-in one can't run
+    Improved: Help screen redesigned - about, legend and app list help in one place; icons for special entries (kernel, system services, media, etc.)
+    Improved: New-app notification says which connections the app got
+    Changed: "Experimental" settings moved into Rules/Connectivity; "Migrate profiles" removed (now automatic)
+    Changed: Custom script lines with shell syntax (&&, ;, |, sourcing a file, $IPV6, $BUSYBOX) are not run; the editor and a notification name the line and the reason
+    Fixed: Missing system and Private Space apps (#1476, #1482, #1485, #1490, #1499)
+    Fixed: nflog on Android 16 (#1505, #1506) and iptables-restore wait option on older iptables (#1500)
+    Fixed: Device left offline at boot or after a failed apply
+    Fixed: Widget, quick settings tile and Tasker issues - other apps or the lock screen could turn the firewall off
+    Fixed: Crashes on Android 12+/15 background starts, after importing a backup and in the log details
+    Fixed: Rules of hidden apps deleted on apply; direct rules duplicated or applied to the wrong user
+    Fixed: Default connections for new apps - allow-list and block-list mode settings overwrote each other
+    Fixed: Export from the log and data dump did nothing after granting the storage permission
+    Fixed: Custom scripts - rules added again on every apply and network change, IPv4 rules added twice with IPv6 on, lines starting with -A and $IP6TABLES lines never worked, rules in the -postcustom chains lost, shutdown script not run for IPv6
+    Fixed: Language - Portuguese (Brazil), Serbian (Latin) and Asturian showed English, "System" showed English, several screens ignored the chosen language, Serbian Cyrillic/Latin labels swapped
+
+AFWall+ v4.1.0
+
+    Added: Custom rules at the application level - direct per-app allow/block rules
+    Added: Custom theme maker with pre-built themes (Amber, Ocean, Forest, Slate, Plum, Black) plus a high-contrast light theme
+    Added: Multi-user / work-profile app detection and improved app search
+    Added: Option to show package name alongside app name in the list
+    Improved: Firewall rule generation - IPv6 control traffic (ICMPv6 RS/RA/NS/NA), loopback routing, LAN discovery (multicast/broadcast/mDNS/SSDP), tethered DHCP replies, Tor redirect ordering, reject-chain logging
+    Improved: Root apply reliability - consistent failure handling; success now waits for both IPv4 and IPv6 rule application to complete
+    Improved: Log service reliability - watchdog restarts a dead log watcher, batched log writes
+    Improved: Multiple LAN subnets now route correctly to WAN (Issue #1362)
+    Fixed: Missing system apps caused by removal of QUERY_ALL_PACKAGES
+    Fixed: Import/export - removed filter that hid valid AFWall+ backup files
+    Fixed: Widget bugs - repeated toggle callback reuse, activity reference leak
+    Reverted: Per-app localhost blocking (Issue #1421) - reverted pending a more reliable approach
+    Updated: Target SDK 36 (Android 16) support
+
+AFWall+ v4.0.1
+
+    Fixed boot rules not being applied (#1438)
+    Fixed app search not working (#1445)
+    Fixed pull to refresh when list is empty (#1439)
+    Updated Magisk binary location (#1437)
+    Relaxed sanitize rule to allow existing custom rules
+    Added back button to PreferencesActivity
+    Optimized pattern handling and memory management
+    Added build scripts for F-Droid (#1441)
+
+AFWall+ v4.0.0
+
+🚀 Major Features & Enhancements
+
+🎯 Rule Management & Stability
+
+- Fixed critical rule application issues - Resolved iptables command failures and cascade errors
+- Improved error handling - Smart selective error handling prevents unnecessary fallbacks
+- Enhanced chain management - Better synchronization prevents race conditions
+- Owner module compatibility - Automatic detection and fallback for devices without owner
+  iptables module
+
+🎨 Material Design Overhaul
+
+- Modernized UI - Material Design enhancements for rules, help, and custom scripts views
+- Revamped help section - Complete redesign with better organization and moved legends
+- Visual widget indicators - Added pulse animations and visual feedback for toggle widgets
+- Improved layouts - Fixed layout issues for devices with merged status bars
+
+📊 Enhanced Logging System
+
+- Better log details view - Enhanced display with allow/deny address information
+- Improved UID detection - Better handling of special UIDs (including uid -100) and bug fixes
+- Seamless log target switching - Dynamic switching between LOG and NFLOG in preferences
+- NFLOG improvements - Better NFLOG and LOG handling with updated binaries
+
+🔒 Security Enhancements
+
+- Upgraded encryption - Migrated from DES to AES for better security
+- Enhanced security utilities - New SecureCrypto and SecurityUtil classes
+- Input validation improvements - Better validation and security checks
+
+🛠 Platform & Compatibility
+
+📱 Android Support
+
+- Android 16 preparation - Updated build configuration for future Android support
+- Binary updates - Cross-compiled binaries: busybox v1.36.1, iptables v1.8.10
+- Architecture support - Added ARM64 binaries and improved architecture detection
+- GitHub Actions CI - Automated binary builds and improved CI/CD pipeline
+
+🔧 Bug Fixes & Stability
+
+- Export/Import fixes - Resolved bugs when handling large numbers of files (#1399, #1401)
+- Build error fixes - Fixed app:tint and other build-related issues
+- Service leak fixes - Improved thread safety and fixed service connection leaks
+- USB tethering support - Added auto-detection and support for USB tethering
+- DNS forwarding - Improved DNS handling for tethering scenarios
+
+🔧 Technical Improvements
+
+⚡ Performance & Threading
+
+- Thread safety - Improved synchronization and thread-safe operations
+- Better exception handling - More robust error handling and recovery
+- Optimized rule processing - Faster and more reliable rule application
+
+🛠 Developer Experience
+
+- Code cleanup - Extensive refactoring and code organization improvements
+- CI/CD enhancements - Updated GitHub Actions and automated workflows
+- Binary management - Automated cross-compilation and binary distribution
+
+📋 Specific Issue Fixes
+
+- #1386 - Default chain rules only applied when necessary (with smart revert)
+- #1410 - Fallback on default commands when needed
+- #1423, #1382 - Various stability and functionality fixes
+- #1400 - Layout fixes for merged status bar screens
+- #1399 - Export only enabled rule types
+- #1169 - Export/import rule improvements
+
+⚠️ Breaking Changes
+
+- Security upgrade - DES encryption deprecated in favor of AES
+- Removed legacy views - Old unsupported view components removed
+- Binary updates - Requires newer binaries for optimal performance
+
+🙏 Contributors
+
+- @getgo-nobugs - Syntax fixes and improvements
+- @NeroProtagonist - CI/CD updates (upload-artifact@v4)
+- @Fry-kun - Multiple fixes: typos, layout improvements, export fixes, ARM64 NFLOG binary (initial version)
+
+Version 3.6.0
+
+* Updated libraries and SDK (33)
+* Fixes:
+  - Chinese language not working
+  - Added Sinhala language
+  - libsu memory leak
+  - Optimizing copying binaries during install
+  - Log freezing on few devices
+  - Work profile fix for android 12
+* Add support for recent versions of Android.
+* Code optimizations.
+
+
 Version 3.5.3
 
 * New: Enable delay when applying rules (Required for Android 11+ on some devices)

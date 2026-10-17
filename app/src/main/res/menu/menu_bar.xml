@@ -82,16 +82,16 @@
                 app:showAsAction="always" />
 
             <item
+                android:id="@+id/menu_globalrules"
+                android:icon="@drawable/ic_custom_rules"
+                android:title="@string/global_rules"
+                app:showAsAction="always" />
+
+            <item
                 android:id="@+id/menu_setcustom"
                 android:icon="@drawable/ic_script"
                 android:title="@string/set_custom_script"
                 app:showAsAction="always" />
-
-            <!--<item
-                android:id="@+id/menu_customrules"
-                android:icon="@drawable/ic_custom_rules"
-                android:title="@string/custom_rules"
-                app:showAsAction="always" />-->
 
             <item
                 android:id="@+id/menu_preference"
@@ -107,11 +107,6 @@
                 android:id="@+id/menu_import"
                 android:icon="@drawable/ic_import"
                 android:title="@string/imports"
-                app:showAsAction="always" />
-            <item
-                android:id="@+id/menu_legend"
-                android:icon="@drawable/ic_legend"
-                android:title="@string/menu_legend"
                 app:showAsAction="always" />
             <item
                 android:id="@+id/menu_help"

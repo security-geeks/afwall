@@ -5,9 +5,7 @@ import static dev.ukanth.ufirewall.Api.TAG;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -22,12 +20,13 @@ import org.ocpsoft.prettytime.units.JustNow;
 
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 
 import dev.ukanth.ufirewall.Api;
 import dev.ukanth.ufirewall.R;
+import dev.ukanth.ufirewall.util.AppIcons;
+import dev.ukanth.ufirewall.util.AppLanguage;
 import dev.ukanth.ufirewall.util.G;
 
 /**
@@ -61,83 +60,12 @@ public class LogRecyclerViewAdapter extends RecyclerView.Adapter<LogRecyclerView
         return new ViewHolder(mView);
     }
 
-    /*private Bitmap getAppIcon(PackageManager mPackageManager, ApplicationInfo applicationInfo) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return getAppIcon26(mPackageManager, applicationInfo);
-        }
-        try {
-            Drawable drawable = mPackageManager.getApplicationIcon(applicationInfo);
-            return ((BitmapDrawable) drawable).getBitmap();
-        } catch (Exception e) {
-            Log.e(TAG, e.getMessage(), e);
-        }
-        return null;
-    }
-
-    @RequiresApi(api = Build.VERSION_CODES.O)
-    private Bitmap getAppIcon26(PackageManager mPackageManager, ApplicationInfo applicationInfo) {
-        Drawable drawable = mPackageManager.getApplicationIcon(applicationInfo);
-        if (drawable instanceof BitmapDrawable) {
-            return ((BitmapDrawable) drawable).getBitmap();
-        } else if (drawable instanceof AdaptiveIconDrawable) {
-            Drawable backgroundDr = ((AdaptiveIconDrawable) drawable).getBackground();
-            Drawable foregroundDr = ((AdaptiveIconDrawable) drawable).getForeground();
-
-            Drawable[] drr = new Drawable[2];
-            drr[0] = backgroundDr;
-            drr[1] = foregroundDr;
-
-            LayerDrawable layerDrawable = new LayerDrawable(drr);
-
-            int width = layerDrawable.getIntrinsicWidth();
-            int height = layerDrawable.getIntrinsicHeight();
-
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-
-            Canvas canvas = new Canvas(bitmap);
-
-            layerDrawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-            layerDrawable.draw(canvas);
-
-            return bitmap;
-        }
-
-        return null;
-    }*/
-
     @Override
     public void onBindViewHolder(ViewHolder holder, int position) {
         data = logData.get(position);
-        PackageManager manager = context.getPackageManager();
         holder.bind(logData.get(position),recyclerItemClickListener);
-        try {
-            HashMap<Integer,String> listMaps = Api.getPackagesForUser(Api.getListOfUids());
-            info = Api.getPackageDetails(context, listMaps, data.getUid());
-            if(info!=null && info.applicationInfo !=null) {
-                Object drawable = info.applicationInfo.loadIcon(manager);
-                if (drawable instanceof Bitmap)
-                    holder.icon.setImageBitmap((Bitmap)drawable);
-                else
-                    holder.icon.setBackground((Drawable)drawable);
-            } else{
-                Drawable appIcon = context.getDrawable(R.drawable.ic_unknown);
-                holder.icon.setImageBitmap(Api.getBitmapFromDrawable(appIcon));
-            }
-        } catch (Exception e) {
-            Log.e(TAG,e.getMessage(),e);
-            info = null;
-            try {
-                if(Build.VERSION.SDK_INT > android.os.Build.VERSION_CODES.O) {
-                    holder.icon.setBackground(context.getDrawable(R.drawable.ic_unknown));
-                } else {
-                    Drawable appIcon = context.getDrawable(R.drawable.ic_unknown);
-                    holder.icon.setImageBitmap(Api.getBitmapFromDrawable(appIcon));
-                }
-            }catch (Exception e1) {
-                Log.e(TAG,e1.getMessage(),e1);
-            }
-        }
-
+        // loaded off the main thread, work profile apps badged
+        AppIcons.showAsBackground(context, data.getUid(), holder.icon);
 
         try {
             //if(data.getTimestamp() != null && !data.getTimestamp().isEmpty()) {
@@ -157,7 +85,7 @@ public class LogRecyclerViewAdapter extends RecyclerView.Adapter<LogRecyclerView
 
     public static String pretty(Date date) {
         if (prettyTime == null) {
-            prettyTime = new PrettyTime(new Locale(G.locale()));
+            prettyTime = new PrettyTime(AppLanguage.locale());
             for (TimeUnit t : prettyTime.getUnits()) {
                 if (t instanceof JustNow) {
                     prettyTime.removeUnit(t);

@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.text.InputType;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
@@ -48,15 +49,98 @@ public class SecurityUtil {
                     if (createConfirmDeviceCredentialIntent != null) {
                         try {
                             activity.startActivityForResult(createConfirmDeviceCredentialIntent, LOCK_VERIFICATION);
+                            return;
                         } catch (ActivityNotFoundException e) {
                         }
                     }
                 } else {
                     Toast.makeText(activity, context.getText(R.string.android_version), Toast.LENGTH_SHORT).show();
                 }
-            } else {
+            } else if (callback == null) {
                 Api.donateDialog(activity, true);
             }
+            // no device lock to check: the app's screens let the user in then, so do the same
+            report(true);
+        }
+    }
+
+    /**
+     * Result of {@link #passCheck(Callback)}.
+     */
+    public interface Callback {
+        void onResult(boolean allowed);
+    }
+
+    // set in callback mode: the caller continues after the check, and cancelling only reports it
+    private Callback callback;
+
+    /**
+     * Check the app lock, then report the result instead of just letting the user in (as
+     * {@link #passCheck()} does for the app's screens). For actions started outside the app
+     * (widgets, tile). Cancelling calls back with false; it doesn't close the app.
+     * <p>
+     * The activity must pass its onActivityResult() calls to {@link #handleActivityResult}.
+     */
+    public void passCheck(Callback callback) {
+        if (!isPasswordProtected()) {
+            callback.onResult(true);
+            return;
+        }
+        this.callback = callback;
+        if (!startPrompt()) {
+            // nothing to ask for the configured lock (e.g. fingerprint no longer available)
+            report(true);
+        }
+    }
+
+    /**
+     * @return true if a prompt was started; it reports its result through the callback
+     */
+    private boolean startPrompt() {
+        if (G.enableDeviceCheck()) {
+            deviceCheck();
+            return true;
+        }
+        switch (G.protectionLevel()) {
+            case "p1":
+                if (G.profile_pwd().length() > 0) {
+                    requestPassword();
+                    return true;
+                }
+                return false;
+            case "p2":
+                if (G.sPrefs.getString("LockPassword", "").length() > 0) {
+                    requestPassword();
+                    return true;
+                }
+                return false;
+            case "p3":
+                if (FingerprintUtil.isAndroidSupport() && G.isFingerprintEnabled()) {
+                    requestFingerprint();
+                    return true;
+                }
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * @return true if the result belonged to the check started by {@link #passCheck(Callback)}
+     */
+    public boolean handleActivityResult(int requestCode, int resultCode) {
+        if (callback == null || (requestCode != LOCK_VERIFICATION && requestCode != REQ_ENTER_PATTERN)) {
+            return false;
+        }
+        report(resultCode == Activity.RESULT_OK);
+        return true;
+    }
+
+    private void report(boolean allowed) {
+        Callback cb = callback;
+        callback = null;
+        if (cb != null) {
+            cb.onResult(allowed);
         }
     }
 
@@ -115,9 +199,15 @@ public class SecurityUtil {
     private void requestFingerprint() {
         FingerprintUtil.FingerprintDialog dialog = new FingerprintUtil.FingerprintDialog(activity);
         dialog.setOnFingerprintFailureListener(() -> {
-            activity.finish();
-            android.os.Process.killProcess(android.os.Process.myPid());
+            if (callback != null) {
+                report(false);
+            } else {
+                gracefulShutdown();
+            }
         });
+        if (callback != null) {
+            dialog.setOnFingerprintSuccess(() -> report(true));
+        }
         dialog.show();
     }
 
@@ -125,8 +215,7 @@ public class SecurityUtil {
     private void requestFingerprintQ() {
         BiometricUtil.FingerprintDialog dialog = new BiometricUtil.FingerprintDialog(activity);
         dialog.setOnFingerprintFailureListener(() -> {
-            activity.finish();
-            android.os.Process.killProcess(android.os.Process.myPid());
+            gracefulShutdown();
         });
         dialog.show();
     }
@@ -141,26 +230,26 @@ public class SecurityUtil {
                         .positiveText(R.string.submit)
                         .negativeText(R.string.Cancel)
                         .onNegative((dialog, which) -> {
-                            activity.finish();
-                            android.os.Process.killProcess(android.os.Process.myPid());
+                            if (callback != null) {
+                                dialog.dismiss();
+                                report(false);
+                            } else {
+                                gracefulShutdown();
+                            }
                         })
                         .input(R.string.enterpass, R.string.password_empty, (dialog, input) -> {
-                            String pass = input.toString();
-                            boolean isAllowed = false;
-                            if (G.isEnc()) {
-                                String decrypt = Api.unhideCrypt("AFW@LL_P@SSWORD_PR0T3CTI0N", G.profile_pwd());
-                                if (decrypt != null) {
-                                    if (decrypt.equals(pass)) {
-                                        isAllowed = true;
-                                    }
-                                }
-                            } else {
-                                if (pass.equals(G.profile_pwd())) {
-                                    isAllowed = true;
-                                }
+                            String pass = InputValidator.sanitizeString(input.toString(), 256);
+                            if (pass == null) {
+                                Api.toast(activity, context.getString(R.string.wrong_password));
+                                return;
                             }
+                            
+                            // Use secure password manager for verification and auto-migration
+                            boolean isAllowed = SecurePasswordManager.verifyPassword(context, pass);
+                            
                             if (isAllowed) {
                                 dialog.dismiss();
+                                report(true);
                             } else {
                                 Api.toast(activity, context.getString(R.string.wrong_password));
                             }
@@ -176,5 +265,34 @@ public class SecurityUtil {
                 break;
         }
 
+    }
+
+    /**
+     * Perform graceful shutdown instead of abrupt process termination
+     * This ensures proper cleanup and prevents firewall rules from being left in inconsistent state
+     */
+    private void gracefulShutdown() {
+        try {
+            // Give some time for any pending operations to complete
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try {
+                    // Attempt to save any pending state or cleanup
+                    activity.moveTaskToBack(true);
+                    activity.finishAndRemoveTask();
+                } catch (Exception e) {
+                    // If graceful methods fail, fall back to finish()
+                    activity.finish();
+                } finally {
+                    // Only use process kill as absolute last resort after cleanup attempt
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    }, 500); // 500ms delay to allow cleanup
+                }
+            });
+        } catch (Exception e) {
+            Log.e("SecurityUtil", "Error during graceful shutdown", e);
+            // Emergency fallback
+            activity.finish();
+        }
     }
 }

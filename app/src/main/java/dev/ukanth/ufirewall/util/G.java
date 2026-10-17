@@ -34,6 +34,7 @@ import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.Build;
 import android.os.Bundle;
@@ -46,10 +47,13 @@ import com.raizlabs.android.dbflow.config.FlowConfig;
 import com.raizlabs.android.dbflow.config.FlowManager;
 import com.raizlabs.android.dbflow.sql.language.SQLite;
 
+import dev.ukanth.ufirewall.MainActivity;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -59,11 +63,13 @@ import dev.ukanth.ufirewall.Api;
 import dev.ukanth.ufirewall.BuildConfig;
 import dev.ukanth.ufirewall.InterfaceTracker;
 import dev.ukanth.ufirewall.MainActivity;
+import dev.ukanth.ufirewall.R;
 import dev.ukanth.ufirewall.log.Log;
 import dev.ukanth.ufirewall.log.LogPreference;
 import dev.ukanth.ufirewall.log.LogPreferenceDB;
 import dev.ukanth.ufirewall.log.LogPreference_Table;
 import dev.ukanth.ufirewall.preferences.DefaultConnectionPref;
+import dev.ukanth.ufirewall.profiles.ProfileHelper;
 import dev.ukanth.ufirewall.preferences.DefaultConnectionPrefDB;
 
 public class G extends Application implements Application.ActivityLifecycleCallbacks{
@@ -73,12 +79,13 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     private static boolean enabledPrivateLink = false;
 
     private static boolean isActivityVisible;
+    
+    private static Thread.UncaughtExceptionHandler defaultExceptionHandler;
 
     static {
-        //TODO: Remove this line before release
-        //com.topjohnwu.superuser.Shell.enableVerboseLogging = BuildConfig.DEBUG;
         com.topjohnwu.superuser.Shell.setDefaultBuilder(com.topjohnwu.superuser.Shell.Builder.create()
                 .setFlags(com.topjohnwu.superuser.Shell.FLAG_REDIRECT_STDERR)
+                .setTimeout(30) // 30 second timeout for shell operations
         );
     }
 
@@ -95,6 +102,9 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     private static final String HAS_ROOT = "hasRoot";
     private static final String FIX_START_LEAK = "fixLeak";
     private static final String DISABLE_TASKER_TOAST = "disableTaskerToast";
+    private static final String ALLOW_TASKER_CONTROL = "allowTaskerControl";
+    public static final String TASKER_ACCEPT_UNSIGNED = "taskerAcceptUnsigned";
+    private static final String TASKER_UNSIGNED_SEEN = "taskerUnsignedSeen";
     private static final String REG_DO = "ipurchaseddonatekey";
     private static final String ENABLE_ROAM = "enableRoam";
     private static final String ENABLE_VPN = "enableVPN";
@@ -107,7 +117,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     //private static final String BLOCK_IPV6 = "blockIPv6";
     private static final String ENABLE_INBOUND = "enableInbound";
     private static final String ENABLE_LOG_SERVICE = "enableLogService";
-    private static final String LOG_PING_TIMEOUT = "logPingTime";
     private static final String ENABLE_ADMIN = "enableAdmin";
     private static final String DUAL_APPS = "supportDualApps";
     private static final String ENABLE_DEVICE_CHECK = "enableDeviceCheck";
@@ -117,32 +126,43 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     private static final String NOTIFY_INSTALL = "notifyAppInstall";
     private static final String DISABLE_ICONS = "disableIcons";
     private static final String IPTABLES_PATH = "ipt_path";
+    private static final String IPTABLES_BUILTIN_FAILED = "ipt_builtin_failed";
     private static final String PROTECTION_OPTION = "passSetting";
     private static final String BUSYBOX_PATH = "bb_path";
     private static final String TOAST_POS = "toast_pos";
-    private static final String LANGUAGE = "locale";
     //private static final String LOG_DMESG = "logDmesg";
     private static final String SORT_BY = "sort";
     private static final String LAST_STORED_PROFILE = "storedProfile";
-    private static final String STARTUP_DELAY = "addDelayStart";
+    private static final String STARTUP_DELAY = "addStartupDelay";
+    private static final String STARTUP_DELAY_LEGACY = "addDelayStart";
     private static final String SYSTEM_APP_COLOR = "sysColor";
 
     private static final String PRIMARY_COLOR = "primaryColor";
-    private static final String PRIMARY_DARK_COLOR = "primaryColor";
+    private static final String PRIMARY_DARK_COLOR = "primaryDarkColor";
+    private static final String ACCENT_COLOR = "accentColor";
+    private static final String BACKGROUND_COLOR = "backgroundColor";
+    private static final String TEXT_PRIMARY_COLOR = "textPrimaryColor";
+    private static final String TEXT_SECONDARY_COLOR = "textSecondaryColor";
+    private static final String USER_APP_COLOR = "userColor";
+    private static final String DEFAULT_ICON_COLOR = "defaultIconColor";
+    private static final String CUSTOM_THEME_COLORS = "customThemeColors";
+    private static final String CUSTOM_THEME_SEED_THEME = "customThemeSeedTheme";
+
+    private static final String ENABLE_CUSTOM_RULES = "enableCustomRules";
 
     private static final String ACTIVE_RULES = "activeRules";
     private static final String ADD_DELAY = "addDelay";
 
-    //private static final String ACTIVE_NOTIFICATION = "activeNotification";
+    private static final String ACTIVE_NOTIFICATION = "activeNotification";
     private static final String PROFILE_SWITCH = "applyOnSwitchProfiles";
     private static final String LOG_TARGET = "logTarget";
     private static final String LOG_TARGETS = "logTargets";
     private static final String SHOW_HOST = "showHostName";
     private static final String APP_VERSION = "appVersion";
-    private static final String DNS_PROXY = "dns_value";
     private static final String MULTI_USER = "multiUser";
     private static final String MULTI_USER_ID = "multiUserId";
     private static final String IS_MIGRATED = "isMigrated";
+    private static final String SHOW_PACKAGE_NAME = "showPackageName";
     private static final String SHOW_FILTER = "showFilter";
     private static final String PATTERN_MAX_TRY = "patternMax";
     private static final String PATTERN_STEALTH = "stealthMode";
@@ -152,8 +172,7 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     private static final String FINGERPRINT_ENABLED = "fingerprintEnabled";
     private static final String CUSTOM_DELAY_SECONDS = "customDelay";
     private static final String NOTIFICATION_PRIORITY = "notification_priority";
-    private static final String RUN_NOTIFICATION = "runNotification";
-    private static final String COPIED_OLD_EXPORTS = "copyOldExports";
+    private static final String MOVED_BACKUPS_TO_DOWNLOADS = "backupsMovedToDownloads";
 
     private static final String SHOW_ALL_APPS = "showAllApps";
 
@@ -165,10 +184,9 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     /**
      * FIXME
      **/
-    private static final String AFWALL_STATUS = "AFWallStaus";
+    private static final String AFWALL_STATUS = "AFWallStatus";
     //private static final String BLOCKED_NOTIFICATION = "block_filter_app";
     /* Profiles */
-    private static final String ADDITIONAL_PROFILES = "plusprofiles";
     //private static final String PROFILES = "profiles_json";
     private static final String PROFILES_MIGRATED = "profilesmigrated";
     private static final String WIDGET_X = "widgetX";
@@ -186,10 +204,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
 
     private static final String INITPATH = "initPath";
 
-    private static final String AFWALL_PROFILE = "AFWallProfile";
-    //private static final String SHOW_LOG_TOAST = "showLogToasts";
-    public static String[] profiles = {"AFWallPrefs", AFWALL_PROFILE + 1, AFWALL_PROFILE + 2, AFWALL_PROFILE + 3};
-    public static String[] default_profiles = {"AFWallProfile1", "AFWallProfile2", "AFWallProfile3"};
     public static Context ctx;
     public static SharedPreferences gPrefs;
     public static SharedPreferences pPrefs;
@@ -204,7 +218,27 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static boolean supportDual() {
-        return gPrefs.getBoolean(DUAL_APPS, false);
+        return gPrefs.getBoolean(DUAL_APPS, hasOtherProfiles());
+    }
+
+    private static Boolean hasOtherProfiles;
+
+    /**
+     * Default of "dual apps support": on when the device has a work profile / clone profile, so
+     * those apps are listed without having to find the setting. Only applies until the user sets it.
+     */
+    private static boolean hasOtherProfiles() {
+        if (hasOtherProfiles == null) {
+            boolean found = false;
+            try {
+                android.os.UserManager um = (android.os.UserManager) ctx.getSystemService(Context.USER_SERVICE);
+                found = um != null && um.getUserProfiles().size() > 1;
+            } catch (Exception e) {
+                Log.w(TAG, "Unable to list user profiles: " + e.getMessage());
+            }
+            hasOtherProfiles = found;
+        }
+        return hasOtherProfiles;
     }
 
     public static boolean supportDual(boolean val) {
@@ -223,22 +257,14 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
 
-    public static boolean isRun() {
-        return gPrefs.getBoolean(RUN_NOTIFICATION, true);
+
+
+    public static boolean hasMovedBackupsToDownloads() {
+        return gPrefs.getBoolean(MOVED_BACKUPS_TO_DOWNLOADS, false);
     }
 
-    public static boolean isRun(boolean val) {
-        gPrefs.edit().putBoolean(RUN_NOTIFICATION, val).commit();
-        return val;
-    }
-
-
-    public static boolean hasCopyOld() {
-        return gPrefs.getBoolean(COPIED_OLD_EXPORTS, false);
-    }
-
-    public static boolean hasCopyOldExports(boolean val) {
-        gPrefs.edit().putBoolean(COPIED_OLD_EXPORTS, val).commit();
+    public static boolean hasMovedBackupsToDownloads(boolean val) {
+        gPrefs.edit().putBoolean(MOVED_BACKUPS_TO_DOWNLOADS, val).apply();
         return val;
     }
 
@@ -336,8 +362,86 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static String getSelectedTheme(String val) {
-        gPrefs.edit().putString(THEME, val).commit();
+        String theme = normalizeTheme(val);
+        SharedPreferences.Editor editor = gPrefs.edit().putString(THEME, theme);
+        seedCustomThemeColors(editor, theme);
+        editor.commit();
+        return theme;
+    }
+
+    private static void seedCustomThemeColors(SharedPreferences.Editor editor, String theme) {
+        editor.putInt(SYSTEM_APP_COLOR, defaultSystemAppColor(theme))
+                .putInt(PRIMARY_COLOR, defaultPrimaryColor(theme))
+                .putInt(PRIMARY_DARK_COLOR, defaultPrimaryDarkColor(theme))
+                .putInt(ACCENT_COLOR, defaultAccentColor(theme))
+                .putInt(BACKGROUND_COLOR, defaultBackgroundColor(theme))
+                .putInt(TEXT_PRIMARY_COLOR, defaultTextPrimaryColor(theme))
+                .putInt(TEXT_SECONDARY_COLOR, defaultTextSecondaryColor(theme))
+                .putInt(USER_APP_COLOR, defaultUserAppColor(theme))
+                .putInt(DEFAULT_ICON_COLOR, defaultAndroidIconColor(theme))
+                .putString(CUSTOM_THEME_SEED_THEME, normalizeTheme(theme));
+    }
+
+    public static void seedCustomThemeColorsFromSelectedThemeIfNeeded() {
+        String theme = normalizeTheme(getSelectedTheme());
+        if (!theme.equals(gPrefs.getString(CUSTOM_THEME_SEED_THEME, ""))) {
+            SharedPreferences.Editor editor = gPrefs.edit();
+            seedCustomThemeColors(editor, theme);
+            editor.commit();
+        }
+    }
+
+    public static String normalizeTheme(String val) {
+        if ("L".equals(val) || "LHC".equals(val) || "B".equals(val) || "A".equals(val)
+                || "O".equals(val) || "F".equals(val) || "S".equals(val) || "P".equals(val)) {
+            return val;
+        }
+        return "D";
+    }
+
+    public static boolean isThemeDonorRequired(String val) {
+        return !"D".equals(normalizeTheme(val));
+    }
+
+    public static boolean canUseDonorFeatures(Context context) {
+        return isDonate() || (context != null && isDoKey(context));
+    }
+
+    public static boolean isThemeAvailable(String val, Context context) {
+        return !isThemeDonorRequired(val) || canUseDonorFeatures(context);
+    }
+
+    public static String getEffectiveSelectedTheme(Context context) {
+        String theme = normalizeTheme(getSelectedTheme());
+        return isThemeAvailable(theme, context) ? theme : "D";
+    }
+
+    public static boolean customThemeColorsEnabled(boolean val) {
+        gPrefs.edit().putBoolean(CUSTOM_THEME_COLORS, val).commit();
         return val;
+    }
+
+    public static boolean customThemeColorsEnabled() {
+        return gPrefs.getBoolean(CUSTOM_THEME_COLORS, false);
+    }
+
+    public static boolean isCustomThemeActive(Context context) {
+        return customThemeColorsEnabled() && canUseDonorFeatures(context);
+    }
+
+    public static int getSelectedThemeStyle(Context context) {
+        switch (getEffectiveSelectedTheme(context)) {
+            case "L":   return R.style.AppLightTheme;
+            case "LHC": return R.style.AppLightHighContrastTheme;
+            case "B":   return R.style.AppBlackTheme;
+            case "A":   return R.style.AppAmberTheme;
+            case "O":   return R.style.AppOceanTheme;
+            case "F":   return R.style.AppForestTheme;
+            case "S":   return R.style.AppSlateTheme;
+            case "P":   return R.style.AppPlumTheme;
+            case "D":
+            default:    return R.style.AppDarkTheme;
+        }
     }
 
     public static String profile_pwd() {
@@ -350,7 +454,11 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static int getNotificationPriority() {
-        return Integer.parseInt(gPrefs.getString(NOTIFICATION_PRIORITY, "0"));
+        try {
+            return Integer.parseInt(gPrefs.getString(NOTIFICATION_PRIORITY, "0"));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
 
@@ -390,7 +498,7 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
-   /* public static boolean activeNotification() {
+    public static boolean activeNotification() {
         return gPrefs.getBoolean(ACTIVE_NOTIFICATION, true);
     }
 
@@ -399,14 +507,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
-    public static boolean showLogToasts() {
-        return gPrefs.getBoolean(SHOW_LOG_TOAST, false);
-    }
-
-    public static boolean showLogToasts(boolean val) {
-        gPrefs.edit().putBoolean(SHOW_LOG_TOAST, val).commit();
-        return val;
-    }*/
 
     public static boolean fixLeak() {
         return gPrefs.getBoolean(FIX_START_LEAK, false);
@@ -414,6 +514,46 @@ public class G extends Application implements Application.ActivityLifecycleCallb
 
     public static boolean disableTaskerToast() {
         return gPrefs.getBoolean(DISABLE_TASKER_TOAST, false);
+    }
+
+    /**
+     * The off switch for Tasker/Locale actions; on by default so existing setups keep working.
+     */
+    public static boolean allowTaskerControl() {
+        return gPrefs.getBoolean(ALLOW_TASKER_CONTROL, true);
+    }
+
+    /**
+     * Run Tasker/Locale actions saved before 5.1.0, which aren't signed (so any app could send
+     * them). On for updates, so existing setups keep working while they are saved again; off for
+     * new installs, which have no such actions. Decided once and stored.
+     */
+    public static boolean taskerAcceptUnsigned(Context ctx) {
+        if (!gPrefs.contains(TASKER_ACCEPT_UNSIGNED)) {
+            boolean update = false;
+            try {
+                android.content.pm.PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+                update = info.firstInstallTime != info.lastUpdateTime;
+            } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+            }
+            gPrefs.edit().putBoolean(TASKER_ACCEPT_UNSIGNED, update).apply();
+            return update;
+        }
+        return gPrefs.getBoolean(TASKER_ACCEPT_UNSIGNED, false);
+    }
+
+    /**
+     * An unsigned Tasker/Locale action has reached AFWall+ (run or ignored): only then is the
+     * "Allow unprotected actions" setting shown.
+     */
+    public static boolean taskerUnsignedSeen() {
+        return gPrefs.getBoolean(TASKER_UNSIGNED_SEEN, false);
+    }
+
+    public static void taskerUnsignedSeen(boolean seen) {
+        if (seen != taskerUnsignedSeen()) {
+            gPrefs.edit().putBoolean(TASKER_UNSIGNED_SEEN, seen).apply();
+        }
     }
 
     public static boolean enableIPv6() {
@@ -453,14 +593,23 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
-    public static int logPingTimeout() {
-        return Integer.valueOf(gPrefs.getString(LOG_PING_TIMEOUT, "10"));
+    /**
+     * Read an int preference that may also be stored as a string: the setting screen stores an int,
+     * but older versions and old backup imports wrote a string, and getInt() would throw on that.
+     */
+    private static int readInt(String key, int defaultValue) {
+        Object value = gPrefs.getAll().get(key);
+        if (value instanceof Integer) {
+            return (Integer) value;
+        }
+        if (value instanceof String) {
+            try {
+                return Integer.parseInt(((String) value).trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return defaultValue;
     }
-
-    /*public static void logPingTimeout(int logPingTimeout) {
-        gPrefs.edit().remove(LOG_PING_TIMEOUT);
-        gPrefs.edit().putString(LOG_PING_TIMEOUT, logPingTimeout+"");
-    }*/
 
     public static boolean enableAdmin() {
         return gPrefs.getBoolean(ENABLE_ADMIN, false);
@@ -512,6 +661,15 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
+    public static boolean showPackageName() {
+        return gPrefs.getBoolean(SHOW_PACKAGE_NAME, false);
+    }
+
+    public static boolean showPackageName(boolean val) {
+        gPrefs.edit().putBoolean(SHOW_PACKAGE_NAME, val).commit();
+        return val;
+    }
+
     public static boolean showFilter() {
         return gPrefs.getBoolean(SHOW_FILTER, false);
     }
@@ -543,10 +701,15 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         gPrefs.edit().putString(IPTABLES_PATH, val).commit();
         return val;
     }
-
-    public static String dns_proxy() {
-        return gPrefs.getString(DNS_PROXY, "auto");
+    
+    public static boolean isBuiltinIptablesFailed() {
+        return gPrefs.getBoolean(IPTABLES_BUILTIN_FAILED, false);
     }
+    
+    public static void setBuiltinIptablesFailed(boolean failed) {
+        gPrefs.edit().putBoolean(IPTABLES_BUILTIN_FAILED, failed).commit();
+    }
+
 
     public static String bb_path() {
         return gPrefs.getString(BUSYBOX_PATH, "builtin");
@@ -561,14 +724,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return gPrefs.getString(TOAST_POS, "bottom");
     }
 
-    public static String locale() {
-        return PreferenceManager.getDefaultSharedPreferences(ctx).getString(LANGUAGE, "en");
-    }
-
-    public static String locale(String val) {
-        gPrefs.edit().putString(LANGUAGE, val).commit();
-        return val;
-    }
 
     /*public static String logDmsg() {
         return gPrefs.getString(LOG_DMESG, "OS");
@@ -597,28 +752,167 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static int userColor() {
-        if (G.getSelectedTheme().equals("L")) {
-            return Color.parseColor("#000000");
-        } else {
-            return Color.parseColor("#FFFFFF");
+        return userColor(ctx);
+    }
+
+    public static int userColor(Context context) {
+        if (isCustomThemeActive(context)) {
+            return gPrefs.getInt(USER_APP_COLOR, defaultUserAppColor(getEffectiveSelectedTheme(context)));
         }
+        return defaultUserAppColor(getEffectiveSelectedTheme(context));
     }
 
     public static int sysColor() {
-        if (G.getSelectedTheme().equals("L")) {
-            return gPrefs.getInt(SYSTEM_APP_COLOR, Color.parseColor("#000000"));
-        } else {
-            return gPrefs.getInt(SYSTEM_APP_COLOR, Color.parseColor("#0F9D58"));
+        return sysColor(ctx);
+    }
+
+    public static int sysColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return gPrefs.getInt(SYSTEM_APP_COLOR, defaultSystemAppColor(theme));
+    }
+
+    public static int primaryColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(PRIMARY_COLOR, defaultPrimaryColor(theme))
+                : defaultPrimaryColor(theme);
+    }
+
+    public static int primaryDarkColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(PRIMARY_DARK_COLOR, defaultPrimaryDarkColor(theme))
+                : defaultPrimaryDarkColor(theme);
+    }
+
+    public static int accentColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(ACCENT_COLOR, defaultAccentColor(theme))
+                : defaultAccentColor(theme);
+    }
+
+    public static int backgroundColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(BACKGROUND_COLOR, defaultBackgroundColor(theme))
+                : defaultBackgroundColor(theme);
+    }
+
+    public static int textPrimaryColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(TEXT_PRIMARY_COLOR, defaultTextPrimaryColor(theme))
+                : defaultTextPrimaryColor(theme);
+    }
+
+    public static int textSecondaryColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(TEXT_SECONDARY_COLOR, defaultTextSecondaryColor(theme))
+                : defaultTextSecondaryColor(theme);
+    }
+
+    public static int defaultIconColor() {
+        return defaultIconColor(ctx);
+    }
+
+    public static int defaultIconColor(Context context) {
+        String theme = getEffectiveSelectedTheme(context);
+        return isCustomThemeActive(context)
+                ? gPrefs.getInt(DEFAULT_ICON_COLOR, defaultAndroidIconColor(theme))
+                : defaultAndroidIconColor(theme);
+    }
+
+    private static int defaultUserAppColor(String theme) {
+        return isLightTheme(theme) ? Color.parseColor("#000000") : Color.parseColor("#FFFFFF");
+    }
+
+    private static int defaultSystemAppColor(String theme) {
+        switch (normalizeTheme(theme)) {
+            case "L":
+            case "LHC": return Color.parseColor("#000000");
+            case "B":   return Color.parseColor("#FDDF6C");
+            case "A":   return Color.parseColor("#FFCA28");
+            case "O":   return Color.parseColor("#4FC3F7");
+            case "F":   return Color.parseColor("#81C784");
+            case "S":   return Color.parseColor("#90A4AE");
+            case "P":   return Color.parseColor("#CE93D8");
+            case "D":
+            default:    return Color.parseColor("#0F9D58");
         }
     }
 
-    /*public static int primaryColor() {
-            return gPrefs.getInt(PRIMARY_COLOR, Color.parseColor("#259b24"));
+    private static int defaultPrimaryColor(String theme) {
+        switch (normalizeTheme(theme)) {
+            case "A":   return Color.parseColor("#FFB300");
+            case "O":   return Color.parseColor("#0277BD");
+            case "F":   return Color.parseColor("#2E7D32");
+            case "S":   return Color.parseColor("#455A64");
+            case "P":   return Color.parseColor("#6A1B9A");
+            case "LHC": return Color.parseColor("#FFFFFF");
+            default:    return Color.parseColor("#259B24");
+        }
     }
 
-    public static int primaryDarkColor() {
-        return gPrefs.getInt(PRIMARY_DARK_COLOR, Color.parseColor("#0a7e07"));
-    }*/
+    private static int defaultPrimaryDarkColor(String theme) {
+        switch (normalizeTheme(theme)) {
+            case "A":   return Color.parseColor("#FF8F00");
+            case "O":   return Color.parseColor("#01579B");
+            case "F":   return Color.parseColor("#1B5E20");
+            case "S":   return Color.parseColor("#263238");
+            case "P":   return Color.parseColor("#4A148C");
+            case "LHC": return Color.parseColor("#FFFFFF");
+            default:    return Color.parseColor("#0A7E07");
+        }
+    }
+
+    private static int defaultAccentColor(String theme) {
+        switch (normalizeTheme(theme)) {
+            case "L":
+            case "LHC": return Color.parseColor("#000000");
+            case "B":   return Color.parseColor("#FDDF6C");
+            case "A":
+            case "O":   return Color.parseColor("#00ACC1");
+            case "F":   return Color.parseColor("#C0CA33");
+            case "S":   return Color.parseColor("#FFB300");
+            case "P":   return Color.parseColor("#FF7043");
+            case "D":
+            default:    return Color.parseColor("#FFD740");
+        }
+    }
+
+    private static int defaultBackgroundColor(String theme) {
+        switch (normalizeTheme(theme)) {
+            case "L":
+            case "LHC": return Color.parseColor("#FFFFFF");
+            case "B":   return Color.parseColor("#000000");
+            case "A":   return Color.parseColor("#2B2415");
+            case "O":   return Color.parseColor("#102A43");
+            case "F":   return Color.parseColor("#17251B");
+            case "S":   return Color.parseColor("#1F2428");
+            case "P":   return Color.parseColor("#241B2F");
+            case "D":
+            default:    return Color.parseColor("#313131");
+        }
+    }
+
+    private static int defaultTextPrimaryColor(String theme) {
+        return isLightTheme(theme) ? Color.parseColor("#000000") : Color.parseColor("#FFFFFF");
+    }
+
+    private static int defaultTextSecondaryColor(String theme) {
+        return isLightTheme(theme) ? Color.parseColor("#000000") : Color.parseColor("#FFFFFF");
+    }
+
+    private static int defaultAndroidIconColor(String theme) {
+        return defaultSystemAppColor(theme);
+    }
+
+    private static boolean isLightTheme(String theme) {
+        String t = normalizeTheme(theme);
+        return "L".equals(t) || "LHC".equals(t);
+    }
 
     public static boolean activeRules() {
         return gPrefs.getBoolean(ACTIVE_RULES, true);
@@ -633,7 +927,17 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static boolean startupDelay() {
-        return gPrefs.getBoolean(STARTUP_DELAY, false);
+        // the setting was saved as "addStartupDelay" but read from "addDelayStart", so it never
+        // took effect; honour both
+        return gPrefs.getBoolean(STARTUP_DELAY, false) || gPrefs.getBoolean(STARTUP_DELAY_LEGACY, false);
+    }
+
+    public static void startupDelay(boolean val) {
+        gPrefs.edit().putBoolean(STARTUP_DELAY, val).remove(STARTUP_DELAY_LEGACY).commit();
+    }
+
+    public static boolean isBootProcessActive() {
+        return BootRuleManager.isBootInProgress();
     }
 
     public static boolean enableStealthPattern() {
@@ -641,7 +945,11 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static int getMaxPatternTry() {
-        return Integer.parseInt(gPrefs.getString(PATTERN_MAX_TRY, "3"));
+        try {
+            return Integer.parseInt(gPrefs.getString(PATTERN_MAX_TRY, "3"));
+        } catch (NumberFormatException e) {
+            return 3;
+        }
     }
 
     public static boolean isMultiUser() {
@@ -731,6 +1039,15 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
+    public static boolean enableCustomRules() {
+        return gPrefs.getBoolean(ENABLE_CUSTOM_RULES, true);
+    }
+
+    public static boolean enableCustomRules(boolean val) {
+        gPrefs.edit().putBoolean(ENABLE_CUSTOM_RULES, val).commit();
+        return val;
+    }
+
     public static boolean enableRoam() {
         return gPrefs.getBoolean(ENABLE_ROAM, false);
     }
@@ -776,9 +1093,42 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return val;
     }
 
+    private static Boolean ownerModuleAvailable = null;
+
+    public static boolean hasOwnerModule() {
+        if (ownerModuleAvailable == null) {
+            // Test if owner module is available by attempting a simple command
+            // This will be cached for the lifetime of the application
+            try {
+                String testCmd = "iptables -t filter -N afwall_owner_test 2>/dev/null; iptables -A afwall_owner_test -m owner --uid-owner 0 -j RETURN 2>/dev/null; iptables -F afwall_owner_test 2>/dev/null; iptables -X afwall_owner_test 2>/dev/null";
+                // For now, assume owner module is available - this will be tested at runtime
+                ownerModuleAvailable = true;
+            } catch (Exception e) {
+                ownerModuleAvailable = false;
+            }
+        }
+        return ownerModuleAvailable;
+    }
+
+    public static void resetOwnerModuleCheck() {
+        ownerModuleAvailable = null;
+    }
+
+    public static boolean hasDonateBuild() {
+        return BuildConfig.APPLICATION_ID.equals("dev.ukanth.ufirewall.donate");
+    }
+
+    public static boolean hasDonateKey(Context ctx) {
+        try {
+            ctx.getPackageManager().getApplicationInfo("dev.ukanth.ufirewall.donatekey", 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException | NullPointerException e) {
+            return false;
+        }
+    }
 
     public static boolean isDonate() {
-        return BuildConfig.APPLICATION_ID.equals("dev.ukanth.ufirewall.donate");
+        return hasDonateBuild();
     }
 
     public static boolean isDoKey(Context ctx) {
@@ -791,9 +1141,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
             } catch (PackageManager.NameNotFoundException | NullPointerException e) {
                 gPrefs.edit().putBoolean(REG_DO, false).commit();
             }
-            /*if(BuildConfig.DONATE){
-                gPrefs.edit().putBoolean(REG_DO, true).commit();
-            }*/
         }
         return gPrefs.getBoolean(REG_DO, false);
     }
@@ -813,7 +1160,11 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static int getCustomDelay() {
-        return gPrefs.getInt(CUSTOM_DELAY_SECONDS, 5) * 1000;
+        return readInt(CUSTOM_DELAY_SECONDS, 5) * 1000;
+    }
+
+    public static int getNetworkDebounceDelay() {
+        return gPrefs.getInt("networkDebounceDelay", 2);
     }
 
     public static int getWidgetY(Context ctx) {
@@ -852,40 +1203,69 @@ public class G extends Application implements Application.ActivityLifecycleCallb
             preference.setUid(uid);
             preference.setTimestamp(System.currentTimeMillis());
             preference.setDisable(true);
+            logMuteCache.put(uid, true);
             FlowManager.getDatabase(LogPreferenceDB.class).beginTransactionAsync(databaseWrapper -> preference.save(databaseWrapper)).build().execute();
         }
     }
 
-    public static void storeDefaultConnection(List<Integer> list1, List<Integer> list2, int modeType) {
-        // store to DB
+    // Default connections for new apps. The table's key ("uid") is the connection column; it
+    // used to be the bare column (0-6) for both modes, so saving one mode overwrote the other.
+    // Each mode now has its own key range; rows of the old form are still read for the mode they
+    // were saved in, until that mode is saved again.
+    private static final int DEFAULT_CONNECTION_KEY_BASE = 1000;
 
-        for (Integer uid : list1) {
-            DefaultConnectionPref preference = new DefaultConnectionPref();
-            preference.setUid(uid);
-            preference.setState(true);
-            preference.setModeType(modeType);
-            FlowManager.getDatabase(DefaultConnectionPrefDB.class).beginTransactionAsync(databaseWrapper -> preference.save(databaseWrapper)).build().execute();
+    private static int defaultConnectionKey(int modeType, int column) {
+        return DEFAULT_CONNECTION_KEY_BASE + modeType * 100 + column;
+    }
+
+    /**
+     * @param list1     connection columns selected by default
+     * @param list2     the other columns
+     * @param modeType  0 = allow-list mode, 1 = block-list mode
+     */
+    public static void storeDefaultConnection(List<Integer> list1, List<Integer> list2, int modeType) {
+        for (DefaultConnectionPref legacy : SQLite.select().from(DefaultConnectionPref.class).queryList()) {
+            if (legacy.getUid() < DEFAULT_CONNECTION_KEY_BASE && legacy.getModeType() == modeType) {
+                legacy.delete(); // replaced by this mode's own rows
+            }
         }
-        for (Integer uid : list2) {
-            DefaultConnectionPref preference = new DefaultConnectionPref();
-            preference.setUid(uid);
-            preference.setState(false);
-            preference.setModeType(modeType);
-            FlowManager.getDatabase(DefaultConnectionPrefDB.class).beginTransactionAsync(databaseWrapper -> preference.save(databaseWrapper)).build().execute();
+        for (Integer column : list1) {
+            saveDefaultConnection(modeType, column, true);
+        }
+        for (Integer column : list2) {
+            saveDefaultConnection(modeType, column, false);
         }
     }
 
+    private static void saveDefaultConnection(int modeType, int column, boolean state) {
+        DefaultConnectionPref preference = new DefaultConnectionPref();
+        preference.setUid(defaultConnectionKey(modeType, column));
+        preference.setState(state);
+        preference.setModeType(modeType);
+        preference.save();
+    }
+
+    /**
+     * @return connection columns selected by default for new apps in {@code modeType}
+     */
     public static List<Integer> readDefaultConnection(int modeType) {
-        List<DefaultConnectionPref> list = SQLite.select()
-                .from(DefaultConnectionPref.class)
-                .queryList();
-        List<Integer> listSelected = new ArrayList<>();
-        for (DefaultConnectionPref pref : list) {
-            if (pref.isState() && pref.getModeType() == modeType) {
-                listSelected.add(pref.getUid());
+        List<Integer> current = new ArrayList<>();
+        List<Integer> legacy = new ArrayList<>();
+        boolean hasCurrent = false;
+        for (DefaultConnectionPref pref : SQLite.select().from(DefaultConnectionPref.class).queryList()) {
+            if (pref.getModeType() != modeType) {
+                continue;
+            }
+            if (pref.getUid() >= DEFAULT_CONNECTION_KEY_BASE) {
+                hasCurrent = true;
+                if (pref.isState()) {
+                    current.add(pref.getUid() % 100);
+                }
+            } else if (pref.isState()) {
+                legacy.add(pref.getUid());
             }
         }
-        return listSelected;
+        return hasCurrent ? current : legacy;
     }
 
     public static List<Integer> readBlockedApps() {
@@ -951,6 +1331,35 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         //Shell.setFlags(Shell.ROOT_SHELL);
         //Shell.setFlags(Shell.FLAG_REDIRECT_STDERR);
         //Shell.verboseLogging(BuildConfig.DEBUG);
+        
+        // Store the default exception handler before replacing it
+        defaultExceptionHandler = Thread.getDefaultUncaughtExceptionHandler();
+        
+        // Set up global exception handler for uncaught library crashes
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread thread, Throwable throwable) {
+                // Check if this is the SuperUser library crash we're trying to prevent
+                if (throwable instanceof java.util.concurrent.RejectedExecutionException &&
+                    thread.getName().startsWith("pool-")) {
+                    Log.w(TAG, "Caught SuperUser library RejectedExecutionException during app shutdown, ignoring to prevent crash");
+                    return; // Silently ignore this specific crash
+                }
+                
+                // Check for ExecutionException with InterruptedIOException
+                if (throwable instanceof java.util.concurrent.ExecutionException &&
+                    throwable.getCause() instanceof java.io.InterruptedIOException) {
+                    Log.w(TAG, "Caught SuperUser library ExecutionException with InterruptedIOException during app shutdown, ignoring to prevent crash");
+                    return; // Silently ignore this specific crash
+                }
+                
+                // For all other exceptions, use the default handler
+                if (defaultExceptionHandler != null) {
+                    defaultExceptionHandler.uncaughtException(thread, throwable);
+                }
+            }
+        });
+        
         registerActivityLifecycleCallbacks(this);
         super.onCreate();
         try {
@@ -961,6 +1370,7 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         }
         ctx = this.getApplicationContext();
         reloadPrefs();
+        ProfileHelper.migrateProfiles(ctx);
 
         //registerNetworkObserver();
     }
@@ -995,23 +1405,6 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return true;
     }
 
-    public static void addAdditionalProfile(String profile) {
-        String previousProfiles = gPrefs.getString(ADDITIONAL_PROFILES, "");
-        StringBuilder builder = new StringBuilder();
-        if (profile != null && profile.length() > 0) {
-            profile = profile.trim();
-            if (previousProfiles.length() == 0) {
-                builder.append(profile);
-            } else {
-                builder.append(previousProfiles);
-                builder.append(",");
-                builder.append(profile);
-            }
-            gPrefs.edit().putString(ADDITIONAL_PROFILES, builder.toString()).commit();
-        }
-    }
-
-
     public static boolean clearSharedPreferences(Context ctx, String preferenceName) {
         File dir = new File(ctx.getFilesDir().getParent() + "/shared_prefs/");
         String[] children = dir.list();
@@ -1024,48 +1417,33 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         return true;
     }
 
-    public static boolean removeAdditionalProfile(String profileName) {
-        //after remove clear all the data inside the custom profile
-        if (ctx != null) {
-            //actually delete the file from disk
-            if (clearSharedPreferences(ctx, profileName)) {
-                String previousProfiles = gPrefs.getString(ADDITIONAL_PROFILES, "");
-                if (!previousProfiles.isEmpty()) {
-                    List<String> items = new ArrayList<String>(Arrays.asList(previousProfiles.split("\\s*,\\s*")));
-                    if (items.remove(profileName)) {
-                        gPrefs.edit().putString(ADDITIONAL_PROFILES, TextUtils.join(",", items)).commit();
-                        return true;
-                    }
-                } else {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    public static List<String> getAdditionalProfiles() {
-        String previousProfiles = gPrefs.getString(ADDITIONAL_PROFILES, "");
-        List<String> items = new ArrayList<>();
-        if (!previousProfiles.isEmpty()) {
-            items = new ArrayList<String>(Arrays.asList(previousProfiles.split("\\s*,\\s*")));
-        }
-        return items;
-    }
-
-    public static List<String> getDefaultProfiles() {
-        return new ArrayList<String>(Arrays.asList(default_profiles));
-    }
-
     public static void updateLogNotification(int uid, boolean isChecked) {
         //update logic here
         LogPreference preference = new LogPreference();
         preference.setUid(uid);
         preference.setTimestamp(System.currentTimeMillis());
         preference.setDisable(isChecked);
+        logMuteCache.put(uid, isChecked);
         FlowManager.getDatabase(LogPreferenceDB.class).beginTransactionAsync(databaseWrapper -> preference.save(databaseWrapper)).build().execute();
+    }
+
+    // uid -> log notifications muted; canShow() is called for every logged packet
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, Boolean> logMuteCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Forget cached mute states after LogPreference rows were written elsewhere (e.g. an import).
+     */
+    public static void clearLogMuteCache() {
+        logMuteCache.clear();
+    }
+
+    /**
+     * Notifications for blocked connections (while the log service runs); on by default, as before
+     * the setting existed.
+     */
+    public static boolean notifyBlocked() {
+        return gPrefs.getBoolean("notifyBlocked", true);
     }
 
     /*public static void isNotificationMigrated(boolean b) {
@@ -1078,10 +1456,15 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     public static boolean canShow(int uid) {
-        LogPreference logPreference = SQLite.select()
-                .from(LogPreference.class)
-                .where(LogPreference_Table.uid.eq(uid)).querySingle();
-        return (logPreference == null) || !logPreference.isDisable();
+        Boolean muted = logMuteCache.get(uid);
+        if (muted == null) {
+            LogPreference logPreference = SQLite.select()
+                    .from(LogPreference.class)
+                    .where(LogPreference_Table.uid.eq(uid)).querySingle();
+            muted = logPreference != null && logPreference.isDisable();
+            logMuteCache.put(uid, muted);
+        }
+        return !muted;
     }
 
     public static boolean isActivityVisible() {
@@ -1118,7 +1501,10 @@ public class G extends Application implements Application.ActivityLifecycleCallb
 
     @Override
     public void onActivityPaused(Activity activity) {
-
+        if (activity instanceof MainActivity) {
+            isActivityVisible = false;
+            cleanupShellInstances();
+        }
     }
 
     @Override
@@ -1169,6 +1555,8 @@ public class G extends Application implements Application.ActivityLifecycleCallb
     }
 
     private static ConnectivityManager.NetworkCallback callback = null;
+    private static final Object VPN_NETWORK_LOCK = new Object();
+    private static final Set<Network> vpnNetworks = new HashSet<>();
 
     public static  void registerPrivateLink() {
         if(!enabledPrivateLink) {
@@ -1179,11 +1567,35 @@ public class G extends Application implements Application.ActivityLifecycleCallb
                     public void onLinkPropertiesChanged(Network network, LinkProperties linkProperties) {
                         super.onLinkPropertiesChanged(network, linkProperties);
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            if(linkProperties.isPrivateDnsActive() != privateDns) {
-                                Log.i(Api.TAG, "Private DNS status changed: " + privateDns);
-                                privateDns = linkProperties.isPrivateDnsActive();
-                                InterfaceTracker.applyRules("Private DNS changed.. reapplying rules");
+                            boolean privateDnsActive = linkProperties.isPrivateDnsActive();
+                            if(privateDnsActive != privateDns) {
+                                Log.i(Api.TAG, "Private DNS status changed: " + privateDnsActive);
+                                privateDns = privateDnsActive;
+                                scheduleNetworkCallbackApply("Private DNS changed", true);
                             }
+                        }
+                    }
+
+                    @Override
+                    public void onCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities) {
+                        super.onCapabilitiesChanged(network, networkCapabilities);
+                        boolean isVpn = networkCapabilities != null
+                                && networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+                        boolean wasVpn = updateTrackedVpnNetwork(network, isVpn);
+                        if (isVpn || wasVpn) {
+                            scheduleNetworkCallbackApply(isVpn
+                                    ? "VPN network capabilities changed"
+                                    : "VPN network capabilities removed", false);
+                        }
+                    }
+
+                    @Override
+                    public void onLost(Network network) {
+                        super.onLost(network);
+                        if (removeTrackedVpnNetwork(network)) {
+                            scheduleNetworkCallbackApply("VPN network lost", false);
+                        } else {
+                            Log.d(Api.TAG, "Non-VPN network lost; no VPN rule refresh needed");
                         }
                     }
                 };
@@ -1193,5 +1605,76 @@ public class G extends Application implements Application.ActivityLifecycleCallb
         } else{
             Log.i(TAG, "Private link has registered already");
         }
+    }
+
+    private static boolean updateTrackedVpnNetwork(Network network, boolean isVpn) {
+        if (network == null) {
+            return false;
+        }
+        synchronized (VPN_NETWORK_LOCK) {
+            boolean wasVpn = vpnNetworks.contains(network);
+            if (isVpn) {
+                vpnNetworks.add(network);
+            } else {
+                vpnNetworks.remove(network);
+            }
+            return wasVpn;
+        }
+    }
+
+    private static boolean removeTrackedVpnNetwork(Network network) {
+        if (network == null) {
+            return false;
+        }
+        synchronized (VPN_NETWORK_LOCK) {
+            return vpnNetworks.remove(network);
+        }
+    }
+
+    private static void scheduleNetworkCallbackApply(String reason, boolean force) {
+        Context context = getContext();
+        if (context == null || !Api.isEnabled(context) || !activeRules()) {
+            Log.d(TAG, reason + ": firewall inactive, not scheduling rule apply");
+            return;
+        }
+        if (!force && !enableVPN()) {
+            Log.d(TAG, reason + ": VPN control is disabled, not scheduling rule apply");
+            return;
+        }
+        Log.i(Api.TAG, reason + ", scheduling network rule refresh");
+        // VPN connect/disconnect is not delivered through the legacy connectivity broadcast on all devices.
+        Api.noteNetworkChange();
+        NetworkChangeDebouncer.scheduleNetworkChange(context, InterfaceTracker.CONNECTIVITY_CHANGE);
+    }
+
+    @Override
+    public void onTerminate() {
+        try {
+            com.topjohnwu.superuser.Shell.getCachedShell().close();
+        } catch (Exception e) {
+        }
+        super.onTerminate();
+    }
+
+    @Override
+    public void onLowMemory() {
+        try {
+            com.topjohnwu.superuser.Shell.getCachedShell().close();
+        } catch (Exception e) {
+        }
+        super.onLowMemory();
+    }
+
+    private static void cleanupShellInstances() {
+        new Thread(() -> {
+            try {
+                com.topjohnwu.superuser.Shell shell = com.topjohnwu.superuser.Shell.getCachedShell();
+                if (shell != null && !shell.isAlive()) {
+                    shell.close();
+                }
+                Thread.sleep(100);
+            } catch (Exception e) {
+            }
+        }).start();
     }
 }

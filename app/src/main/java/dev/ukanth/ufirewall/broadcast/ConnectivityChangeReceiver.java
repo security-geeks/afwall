@@ -30,7 +30,9 @@ import android.content.Intent;
 import dev.ukanth.ufirewall.Api;
 import dev.ukanth.ufirewall.InterfaceTracker;
 import dev.ukanth.ufirewall.log.Log;
+import dev.ukanth.ufirewall.util.BootRuleManager;
 import dev.ukanth.ufirewall.util.G;
+import dev.ukanth.ufirewall.util.NetworkChangeDebouncer;
 
 public class ConnectivityChangeReceiver extends BroadcastReceiver {
 
@@ -45,6 +47,7 @@ public class ConnectivityChangeReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(final Context context, Intent intent) {
+        Api.noteNetworkChange();
 
         int status = Api.getConnectivityStatus(context);
         if (status > 0) {
@@ -55,16 +58,26 @@ public class ConnectivityChangeReceiver extends BroadcastReceiver {
                 int newState = intent.getIntExtra(EXTRA_WIFI_AP_STATE, -1);
                 int oldState = intent.getIntExtra(EXTRA_PREVIOUS_WIFI_AP_STATE, -1);
                 Log.d(TAG, "OS reported AP state change: " + oldState + " -> " + newState);
+            // Note: AP state changes are logged but don't trigger rule application during boot
             }
 
             if (Api.isEnabled(context) && G.activeRules()) {
                 String action = intent.getAction();
+                String reason = action.equals(CONNECTIVITY_ACTION) ? 
+                    InterfaceTracker.CONNECTIVITY_CHANGE : InterfaceTracker.TETHER_STATE_CHANGED;
+                
+                // Check with BootRuleManager if we should process this network change
+                if (!BootRuleManager.shouldProcessNetworkChange(context, reason)) {
+                    Log.d(TAG, "Network change ignored during boot process: " + reason);
+                    return;
+                }
+                
                 if (action.equals(CONNECTIVITY_ACTION)) {
                     Log.i(TAG, "Network change captured.");
-                    InterfaceTracker.applyRulesOnChange(context, InterfaceTracker.CONNECTIVITY_CHANGE);
+                    NetworkChangeDebouncer.scheduleNetworkChange(context, InterfaceTracker.CONNECTIVITY_CHANGE);
                 } else if (action.equals(TETHER_STATE_CHANGED_ACTION)) {
                     Log.i(TAG, "Tether change captured.");
-                    InterfaceTracker.applyRulesOnChange(context, InterfaceTracker.TETHER_STATE_CHANGED);
+                    NetworkChangeDebouncer.scheduleNetworkChange(context, InterfaceTracker.TETHER_STATE_CHANGED);
                 }
             }
         }
